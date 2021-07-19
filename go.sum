@@ -78,6 +78,8 @@ github.com/marten-seemann/qtls-go1-15 v0.1.4/go.mod h1:GyFwywLKkRt+6mfU99csTEY1j
 github.com/marten-seemann/qtls-go1-16 v0.1.3 h1:XEZ1xGorVy9u+lJq+WXNE+hiqRYLNvJGYmwfwKQN2gU=
 github.com/marten-seemann/qtls-go1-16 v0.1.3/go.mod h1:gNpI2Ol+lRS3WwSOtIUUtRwZEQMXjYK+dQSBFbethAk=
 github.com/matttproud/golang_protobuf_extensions v1.0.1/go.mod h1:D8He9yQNgCq6Z5Ld7szi9bcBfOoFv/3dc6xSMkL2PC0=
+github.com/mengelbart/rtq-go v0.1.1-0.20210719164621-f9a7d03528a5 h1:fyp8HELg/6IBGPD0yfAcxcM40iFf+fNGkRKXkO+Y3xQ=
+github.com/mengelbart/rtq-go v0.1.1-0.20210719164621-f9a7d03528a5/go.mod h1:7T4a4gZS4zaizhoRhAN5uwYt+Lme5NLXQ/nyVfPFn+k=
 github.com/mengelbart/scream-go v0.2.1/go.mod h1:Yre6kUFLW62SKaIjBBZF/E93fEBqcCqn6bZyrjljd5k=
 github.com/microcosm-cc/bluemonday v1.0.1/go.mod h1:hsXNsILzKxV+sX77C5b8FSuKF00vh2OMYv+xgHpAMF4=
 github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd/go.mod h1:6dJC0mAP4ikYIbvyc7fijjWJddQyLn8Ig3JB5CqoB9Q=

@@ -25,8 +25,8 @@ RUN go mod download
 
 COPY . .
 
-RUN go build -o /out/sender /src/examples/sender/main.go
-RUN go build -o /out/receiver /src/examples/receiver/main.go
+RUN go build -o /out/sender sender/main.go
+RUN go build -o /out/receiver receiver/main.go
 
 FROM martenseemann/quic-network-simulator-endpoint:latest
 
