@@ -18,6 +18,9 @@ import (
 )
 
 func main() {
+	codec := flag.String("codec", "vp8", "Video Codec")
+	flag.Parse()
+
 	logFilename := os.Getenv("LOG_FILE")
 	if logFilename != "" {
 		logfile, err := os.Create(logFilename)
@@ -52,16 +55,15 @@ func main() {
 		quicConf.Tracer = qlog.NewTracer(qlogWriter)
 	}
 
-	flag.Parse()
 	files := flag.Args()
 
 	log.Printf("args: %v\n", files)
 	src := "videotestsrc"
 	if len(files) > 0 {
-		src = files[0]
+		src = fmt.Sprintf("filesrc location=%v ! queue ! decodebin ! videoconvert ", files[0])
 	}
 
-	err = run(remoteHost, tlsConf, quicConf, src)
+	err = run(remoteHost, tlsConf, quicConf, *codec, src)
 	if err != nil {
 		log.Printf("Could not run sender: %v\n", err.Error())
 		os.Exit(1)
@@ -94,7 +96,7 @@ func (g *gstWriter) Close() error {
 	return g.rtqSession.Close()
 }
 
-func run(addr string, tlsConf *tls.Config, quicConf *quic.Config, src string) error {
+func run(addr string, tlsConf *tls.Config, quicConf *quic.Config, codec, src string) error {
 	quicSession, err := quic.DialAddr(addr, tlsConf, quicConf)
 	if err != nil {
 		return err
@@ -119,11 +121,7 @@ func run(addr string, tlsConf *tls.Config, quicConf *quic.Config, src string) er
 		rtpWriter:  streamWriter,
 	}
 
-	srcStr := src
-	if srcStr != "videotestsrc" {
-		srcStr = fmt.Sprintf("filesrc location=%v ! queue ! decodebin ! videoconvert ", src)
-	}
-	pipeline, err := gstsrc.NewPipeline("h264", srcStr, writer)
+	pipeline, err := gstsrc.NewPipeline(codec, src, writer)
 	if err != nil {
 		return err
 	}

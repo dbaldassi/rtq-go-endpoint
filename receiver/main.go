@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
+	"flag"
 	"fmt"
 	"io"
 	"log"
@@ -21,9 +22,12 @@ import (
 	"github.com/mengelbart/rtq-go-endpoint/internal/utils"
 )
 
-const mtu = 1400
+const mtu = 1200
 
 func main() {
+	codec := flag.String("codec", "vp8", "Video Codec")
+	flag.Parse()
+
 	logFilename := os.Getenv("LOG_FILE")
 	if logFilename != "" {
 		logfile, err := os.Create(logFilename)
@@ -48,19 +52,21 @@ func main() {
 		quicConf.Tracer = qlog.NewTracer(qlogWriter)
 	}
 
+	files := flag.Args()
+
+	log.Printf("args: %v\n", files)
 	dstStr := "autovideosink"
-	dst := os.Getenv("DESTINATION")
-	if len(dst) > 0 {
-		dstStr = fmt.Sprintf("matroskamux ! filesink location=%v", dst)
+	if len(files) > 0 {
+		dstStr = fmt.Sprintf("matroskamux ! filesink location=%v", files[0])
 	}
 
-	err = run(":4242", generateTLSConfig(), quicConf, dstStr)
+	err = run(":4242", generateTLSConfig(), quicConf, *codec, dstStr)
 	if err != nil {
 		log.Fatal(err)
 	}
 }
 
-func run(addr string, tlsConf *tls.Config, quicConf *quic.Config, dst string) error {
+func run(addr string, tlsConf *tls.Config, quicConf *quic.Config, codec, dst string) error {
 	listener, err := quic.ListenAddr(addr, tlsConf, quicConf)
 	if err != nil {
 		return err
@@ -80,7 +86,7 @@ func run(addr string, tlsConf *tls.Config, quicConf *quic.Config, dst string) er
 		return err
 	}
 
-	pipeline, err := gstsink.NewPipeline("h264", dst)
+	pipeline, err := gstsink.NewPipeline(codec, dst)
 	if err != nil {
 		return err
 	}

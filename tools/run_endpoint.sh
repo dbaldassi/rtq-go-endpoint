@@ -12,5 +12,5 @@ if [ "$ROLE" == "sender" ]; then
     QUIC_GO_LOG_LEVEL=debug ./sender $SENDER_PARAMS $VIDEOS
 else
     echo "Running RTQ receiver."
-    QUIC_GO_LOG_LEVEL=debug ./receiver "$@"
+    QUIC_GO_LOG_LEVEL=debug ./receiver $DESTINATION
 fi
