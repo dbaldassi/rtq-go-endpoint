@@ -7,7 +7,7 @@ typedef struct SampleHandlerUserData {
     int pipelineId;
 } SampleHandlerUserData;
 
-extern void goHandleEOS();
+extern void goHandleSendEOS();
 extern void goHandlePipelineBuffer(void *buffer, int bufferLen, int pipelineId);
 
 void gstreamer_send_start_mainloop(void);

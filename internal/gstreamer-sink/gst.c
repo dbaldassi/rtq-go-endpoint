@@ -12,7 +12,7 @@ void gstreamer_receive_start_mainloop(void) {
 static gboolean gstreamer_receive_bus_call(GstBus *bus, GstMessage *msg, gpointer data) {
     switch (GST_MESSAGE_TYPE(msg)) {
     case GST_MESSAGE_EOS: {
-        goHandleEOS();
+        goHandleReceiveEOS();
         break;
     }
 

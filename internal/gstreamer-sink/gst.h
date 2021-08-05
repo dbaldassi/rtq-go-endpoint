@@ -14,6 +14,6 @@ void gstreamer_receive_stop_pipeline(GstElement* pipeline);
 void gstreamer_receive_destroy_pipeline(GstElement* pipeline);
 void gstreamer_receive_push_buffer(GstElement *pipeline, void *buffer, int len);
 
-extern void goHandleEOS();
+extern void goHandleReceiveEOS();
 
 #endif

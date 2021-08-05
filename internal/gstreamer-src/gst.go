@@ -97,8 +97,8 @@ func HandleSinkEOS(handler func()) {
 	eosHandler = handler
 }
 
-//export goHandleEOS
-func goHandleEOS() {
+//export goHandleSendEOS
+func goHandleSendEOS() {
 	eosHandler()
 }
 

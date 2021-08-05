@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/tls"
@@ -9,25 +8,53 @@ import (
 	"encoding/pem"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"math/big"
 	"os"
-	"os/signal"
 
 	"github.com/lucas-clemente/quic-go"
 	"github.com/lucas-clemente/quic-go/qlog"
-	"github.com/mengelbart/rtq-go"
-	gstsink "github.com/mengelbart/rtq-go-endpoint/internal/gstreamer-sink"
+	endpoint "github.com/mengelbart/rtq-go-endpoint"
 	"github.com/mengelbart/rtq-go-endpoint/internal/utils"
+	"github.com/mengelbart/rtq-go-endpoint/rtq"
 )
 
-const mtu = 1200
-
 func main() {
-	codec := flag.String("codec", "vp8", "Video Codec")
+	codec := flag.String("codec", endpoint.H264, "Video Codec")
+	transport := flag.String("transport", endpoint.RTQTransport, fmt.Sprintf("Transport to use, options: '%v', '%v'", endpoint.RTQTransport, endpoint.UDPTransport))
 	flag.Parse()
 
+	files := flag.Args()
+
+	log.Printf("args: %v\n", files)
+	dstStr := "autovideosink"
+	if len(files) > 0 {
+		dstStr = fmt.Sprintf("matroskamux ! filesink location=%v", files[0])
+	}
+
+	var r endpoint.Receiver
+	var err error
+
+	switch *transport {
+	case endpoint.RTQTransport:
+		r, err = setupRTQReceiver(*codec)
+		if err != nil {
+			log.Fatal(err)
+		}
+	case endpoint.UDPTransport:
+		fallthrough
+	default:
+		log.Fatalf("unknown transport: %v\n", *transport)
+	}
+
+	err = r.Receive(dstStr)
+
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
+func setupRTQReceiver(codec string) (*rtq.Receiver, error) {
 	logFilename := os.Getenv("LOG_FILE")
 	if logFilename != "" {
 		logfile, err := os.Create(logFilename)
@@ -41,8 +68,7 @@ func main() {
 
 	qlogWriter, err := utils.GetQLOGWriter()
 	if err != nil {
-		log.Printf("Could not get qlog writer: %s\n", err.Error())
-		os.Exit(1)
+		return nil, fmt.Errorf("could not get qlog writer: %w", err)
 	}
 
 	quicConf := &quic.Config{
@@ -51,91 +77,12 @@ func main() {
 	if qlogWriter != nil {
 		quicConf.Tracer = qlog.NewTracer(qlogWriter)
 	}
-
-	files := flag.Args()
-
-	log.Printf("args: %v\n", files)
-	dstStr := "autovideosink"
-	if len(files) > 0 {
-		dstStr = fmt.Sprintf("matroskamux ! filesink location=%v", files[0])
-	}
-
-	err = run(":4242", generateTLSConfig(), quicConf, *codec, dstStr)
-	if err != nil {
-		log.Fatal(err)
-	}
-}
-
-func run(addr string, tlsConf *tls.Config, quicConf *quic.Config, codec, dst string) error {
-	listener, err := quic.ListenAddr(addr, tlsConf, quicConf)
-	if err != nil {
-		return err
-	}
-	quicSession, err := listener.Accept(context.Background())
-	if err != nil {
-		return err
-	}
-
-	rtqSession, err := rtq.NewSession(quicSession)
-	if err != nil {
-		return err
-	}
-
-	rtqFlow, err := rtqSession.AcceptFlow(0)
-	if err != nil {
-		return err
-	}
-
-	pipeline, err := gstsink.NewPipeline(codec, dst)
-	if err != nil {
-		return err
-	}
-	log.Printf("created pipeline: '%v'\n", pipeline.String())
-
-	destroyed := make(chan struct{}, 1)
-	gstsink.HandleSinkEOS(func() {
-		pipeline.Destroy()
-		destroyed <- struct{}{}
-	})
-	pipeline.Start()
-
-	done := make(chan struct{}, 1)
-	errChan := make(chan error, 1)
-	go func() {
-		for buffer := make([]byte, mtu); ; {
-			n, err := rtqFlow.Read(buffer)
-			if err != nil {
-				if err == io.EOF {
-					close(done)
-					break
-				}
-				errChan <- err
-			}
-			pipeline.Push(buffer[:n])
-		}
-	}()
-	go gstsink.StartMainLoop()
-
-	signals := make(chan os.Signal, 1)
-	signal.Notify(signals, os.Interrupt)
-
-	select {
-	case err1 := <-errChan:
-		err = err1
-	case <-done:
-	case <-signals:
-		log.Printf("got interrupt signal")
-		err := rtqSession.Close()
-		if err != nil {
-			log.Printf("failed to close rtq session: %v\n", err.Error())
-		}
-	}
-
-	log.Println("stopping pipeline")
-	pipeline.Stop()
-	<-destroyed
-	log.Println("destroyed pipeline, exiting")
-	return err
+	return &rtq.Receiver{
+		Addr:       ":4242",
+		TLSConfig:  generateTLSConfig(),
+		QUICConfig: quicConf,
+		Codec:      codec,
+	}, nil
 }
 
 // Setup a bare-bones TLS config for the server

@@ -11,7 +11,7 @@ static gboolean go_gst_bus_call(GstBus *bus, GstMessage *msg, gpointer data) {
     switch (GST_MESSAGE_TYPE(msg)) {
 
     case GST_MESSAGE_EOS: {
-        goHandleEOS();
+        goHandleSendEOS();
         break;
     }
 
