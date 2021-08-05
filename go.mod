@@ -9,3 +9,5 @@ require (
 	github.com/pion/rtcp v1.2.6
 	github.com/pion/rtp v1.6.2
 )
+
+replace github.com/lucas-clemente/quic-go v0.22.0 => github.com/mengelbart/quic-go v0.7.1-0.20210805142916-db5cf9a5170b
