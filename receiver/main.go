@@ -17,12 +17,25 @@ import (
 	endpoint "github.com/mengelbart/rtq-go-endpoint"
 	"github.com/mengelbart/rtq-go-endpoint/internal/utils"
 	"github.com/mengelbart/rtq-go-endpoint/rtq"
+	"github.com/mengelbart/rtq-go-endpoint/udp"
 )
 
 func main() {
+	logFilename := os.Getenv("LOG_FILE")
+	if logFilename != "" {
+		logfile, err := os.Create(logFilename)
+		if err != nil {
+			fmt.Printf("Could not create log file: %s\n", err.Error())
+			os.Exit(1)
+		}
+		defer logfile.Close()
+		log.SetOutput(logfile)
+	}
+
 	codec := flag.String("codec", endpoint.H264, "Video Codec")
 	transport := flag.String("transport", endpoint.RTQTransport, fmt.Sprintf("Transport to use, options: '%v', '%v'", endpoint.RTQTransport, endpoint.UDPTransport))
 	cc := flag.String("cc", "", fmt.Sprintf("Congestion Controller to use, options: '%v', '%v'", "", rtq.SCReAM))
+	addr := flag.String("addr", ":4242", "address to listen and receive video")
 	flag.Parse()
 
 	files := flag.Args()
@@ -38,12 +51,16 @@ func main() {
 
 	switch *transport {
 	case endpoint.RTQTransport:
-		r, err = setupRTQReceiver(*cc, *codec)
+		r, err = setupRTQReceiver(*addr, *cc, *codec)
 		if err != nil {
 			log.Fatal(err)
 		}
 	case endpoint.UDPTransport:
-		fallthrough
+		r = &udp.Receiver{
+			Addr:  *addr,
+			Codec: *codec,
+			CC:    *cc,
+		}
 	default:
 		log.Fatalf("unknown transport: %v\n", *transport)
 	}
@@ -55,18 +72,7 @@ func main() {
 	}
 }
 
-func setupRTQReceiver(cc, codec string) (*rtq.Receiver, error) {
-	logFilename := os.Getenv("LOG_FILE")
-	if logFilename != "" {
-		logfile, err := os.Create(logFilename)
-		if err != nil {
-			fmt.Printf("Could not create log file: %s\n", err.Error())
-			os.Exit(1)
-		}
-		defer logfile.Close()
-		log.SetOutput(logfile)
-	}
-
+func setupRTQReceiver(addr, cc, codec string) (*rtq.Receiver, error) {
 	qlogWriter, err := utils.GetQLOGWriter()
 	if err != nil {
 		return nil, fmt.Errorf("could not get qlog writer: %w", err)
@@ -79,7 +85,7 @@ func setupRTQReceiver(cc, codec string) (*rtq.Receiver, error) {
 		quicConf.Tracer = qlog.NewTracer(qlogWriter)
 	}
 	return &rtq.Receiver{
-		Addr:       ":4242",
+		Addr:       addr,
 		TLSConfig:  generateTLSConfig(),
 		QUICConfig: quicConf,
 		Codec:      codec,
