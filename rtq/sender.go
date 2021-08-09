@@ -2,16 +2,18 @@ package rtq
 
 import (
 	"crypto/tls"
-	"io"
 	"log"
 	"os"
 	"os/signal"
+	"time"
 
 	"github.com/lucas-clemente/quic-go"
 	"github.com/mengelbart/rtq-go"
 	gstsrc "github.com/mengelbart/rtq-go-endpoint/internal/gstreamer-src"
+	cscream "github.com/mengelbart/scream-go"
 	"github.com/pion/interceptor"
 	"github.com/pion/interceptor/pkg/scream"
+	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
 )
 
@@ -21,6 +23,16 @@ type Sender struct {
 	QUICConfig *quic.Config
 	Codec      string
 	CC         string
+}
+
+func ntpTime(t time.Time) uint64 {
+	// seconds since 1st January 1900
+	s := (float64(t.UnixNano()) / 1000000000) + 2208988800
+
+	// higher 32 bits are the integer part, lower 32 bits are the fractional part
+	integerPart := uint32(s)
+	fractionalPart := uint32((s - float64(integerPart)) * 0xFFFFFFFF)
+	return uint64(integerPart)<<32 | uint64(fractionalPart)
 }
 
 func (s *Sender) Send(src string) error {
@@ -42,10 +54,18 @@ func (s *Sender) Send(src string) error {
 	var rtcpfb []interceptor.RTCPFeedback
 
 	var cc *scream.SenderInterceptor
+	type ackedPkt struct {
+		ssrc   uint32
+		seqNr  uint16
+		length int
+	}
+	received := make(chan ackedPkt, 1000)
 
+	var tx *cscream.Tx
 	switch s.CC {
 	case SCReAM:
-		cc, err = scream.NewSenderInterceptor()
+		tx = cscream.NewTx()
+		cc, err = scream.NewSenderInterceptor(scream.Tx(tx))
 		if err != nil {
 			return err
 		}
@@ -63,7 +83,19 @@ func (s *Sender) Send(src string) error {
 		SSRC:         RTPSSRC,
 		RTCPFeedback: rtcpfb,
 	}, interceptor.RTPWriterFunc(func(header *rtp.Header, payload []byte, attributes interceptor.Attributes) (int, error) {
-		return rtpFlow.WriteRTP(header, payload)
+		defer func(t time.Time) {
+			log.Printf("write took %v\n", time.Now().Sub(t))
+		}(time.Now())
+		n := header.MarshalSize() + len(payload)
+		return rtpFlow.WriteRTPNotify(header, payload, func(r bool) {
+			go func() {
+				received <- ackedPkt{
+					ssrc:   header.SSRC,
+					seqNr:  header.SequenceNumber,
+					length: n,
+				}
+			}()
+		})
 	}))
 	rtcpReader := chain.BindRTCPReader(interceptor.RTCPReaderFunc(func(in []byte, attributes interceptor.Attributes) (int, interceptor.Attributes, error) {
 		return len(in), nil, nil
@@ -75,13 +107,6 @@ func (s *Sender) Send(src string) error {
 		rtcpReader: rtcpReader,
 		cc:         cc,
 	}
-	go func() {
-		err := writer.acceptFeedback()
-		if err != nil && err != io.EOF {
-			// TODO: Handle error properly
-			panic(err)
-		}
-	}()
 
 	pipeline, err := gstsrc.NewPipeline(s.Codec, src, writer)
 	if err != nil {
@@ -94,10 +119,47 @@ func (s *Sender) Send(src string) error {
 
 	go gstsrc.StartMainLoop()
 
+	done := make(chan struct{}, 1)
+
+	recorder := cscream.NewRx(RTPSSRC)
+	go func() {
+		for {
+			select {
+			case pkt := <-received:
+				recorder.Receive(ntpTime(time.Now()), pkt.ssrc, pkt.length, pkt.seqNr, 0)
+			case <-done:
+				return
+			}
+		}
+	}()
+
+	go func() {
+		ticker := time.NewTicker(20 * time.Millisecond)
+		rtt := 2 * time.Millisecond
+		lastBitrate := int64(0)
+		for {
+			select {
+			case <-ticker.C:
+				t := time.Now().Add(-rtt)
+				if ok, feedback := recorder.CreateStandardizedFeedback(ntpTime(t), true); ok {
+					fb := rtcp.RawPacket(feedback)
+					tx.IncomingStandardizedFeedback(ntpTime(time.Now()), fb)
+				}
+				bitrate := tx.GetTargetBitrate(RTPSSRC)
+				if bitrate != lastBitrate && bitrate > 0 {
+					lastBitrate = bitrate
+					log.Printf("new target bitrate: %v\n", bitrate)
+					pipeline.SetBitRate(uint(bitrate / 1000)) // Gstreamer expects kbit/s
+				}
+			case <-done:
+				return
+			}
+		}
+	}()
+
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, os.Interrupt)
 
-	done := make(chan struct{}, 1)
 	destroyed := make(chan struct{}, 1)
 	gstsrc.HandleSinkEOS(func() {
 		log.Println("got EOS, stopping pipeline")
@@ -143,6 +205,7 @@ func (g *gstWriter) Write(p []byte) (n int, err error) {
 		return 0, err
 	}
 	n, err = g.rtpWriter.Write(&pkt.Header, p[pkt.Header.MarshalSize():], nil)
+	//log.Printf("sent packet of size %v bytes\n", n)
 	if err != nil {
 		log.Printf("failed to write paket: %v, stopping pipeline\n", err.Error())
 		g.pipeline.Stop()

@@ -13,7 +13,6 @@ import (
 	gstsink "github.com/mengelbart/rtq-go-endpoint/internal/gstreamer-sink"
 	"github.com/pion/interceptor"
 	"github.com/pion/interceptor/pkg/scream"
-	"github.com/pion/rtcp"
 )
 
 const (
@@ -91,7 +90,7 @@ func (r *Receiver) Receive(dst string) error {
 	done := make(chan struct{}, 1)
 	errChan := make(chan error, 1)
 	go func() {
-		for rtcpBound, buffer := false, make([]byte, mtu); ; {
+		for buffer := make([]byte, mtu); ; {
 			n, err := rtqFlow.Read(buffer)
 			if err != nil {
 				if err == io.EOF {
@@ -102,20 +101,6 @@ func (r *Receiver) Receive(dst string) error {
 			}
 			if _, _, err := streamReader.Read(buffer[:n], nil); err != nil {
 				errChan <- err
-			}
-			if !rtcpBound {
-				rtcpFlow, err := rtqSession.OpenWriteFlow(RTCPSSRC)
-				if err != nil {
-					errChan <- err
-				}
-				chain.BindRTCPWriter(interceptor.RTCPWriterFunc(func(pkts []rtcp.Packet, attributes interceptor.Attributes) (int, error) {
-					buf, err := rtcp.Marshal(pkts)
-					if err != nil {
-						return 0, err
-					}
-					return rtcpFlow.Write(buf)
-				}))
-				rtcpBound = true
 			}
 		}
 	}()
