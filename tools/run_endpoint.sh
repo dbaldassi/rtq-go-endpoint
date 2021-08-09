@@ -10,8 +10,8 @@ if [ "$ROLE" == "sender" ]; then
     echo "Starting RTQ sender..."
     echo "Sending video to $RECEIVER"
     echo "Sender params: $SENDER_PARAMS"
-    QUIC_GO_LOG_LEVEL=debug ./sender -remote $RECEIVER $SENDER_PARAMS $VIDEOS
+    QUIC_GO_LOG_LEVEL=debug ./sender -remote $RECEIVER -cc scream $SENDER_PARAMS $VIDEOS
 else
     echo "Running RTQ receiver."
-    QUIC_GO_LOG_LEVEL=debug ./receiver $DESTINATION
+    QUIC_GO_LOG_LEVEL=debug ./receiver -cc scream $DESTINATION
 fi
