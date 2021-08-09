@@ -2,6 +2,7 @@ package rtq
 
 import (
 	"crypto/tls"
+	"io"
 	"log"
 	"os"
 	"os/signal"
@@ -36,14 +37,28 @@ func (s *Sender) Send(src string) error {
 	}
 
 	chain := interceptor.NewChain([]interceptor.Interceptor{})
-	streamWriter := chain.BindLocalStream(&interceptor.StreamInfo{}, interceptor.RTPWriterFunc(func(header *rtp.Header, payload []byte, attributes interceptor.Attributes) (int, error) {
+	streamWriter := chain.BindLocalStream(&interceptor.StreamInfo{
+		SSRC:         RTPSSRC,
+		RTCPFeedback: []interceptor.RTCPFeedback{},
+	}, interceptor.RTPWriterFunc(func(header *rtp.Header, payload []byte, attributes interceptor.Attributes) (int, error) {
 		return rtpFlow.WriteRTP(header, payload)
+	}))
+	rtcpReader := chain.BindRTCPReader(interceptor.RTCPReaderFunc(func(in []byte, attributes interceptor.Attributes) (int, interceptor.Attributes, error) {
+		return len(in), nil, nil
 	}))
 
 	writer := &gstWriter{
 		rtqSession: rtqSession,
 		rtpWriter:  streamWriter,
+		rtcpReader: rtcpReader,
 	}
+	go func() {
+		err := writer.acceptFeedback()
+		if err != nil && err != io.EOF {
+			// TODO: Handle error properly
+			panic(err)
+		}
+	}()
 
 	pipeline, err := gstsrc.NewPipeline(s.Codec, src, writer)
 	if err != nil {
@@ -110,6 +125,23 @@ func (g *gstWriter) Write(p []byte) (n int, err error) {
 	}
 	return
 }
+
+func (g *gstWriter) acceptFeedback() error {
+	rtcpFlow, err := g.rtqSession.AcceptFlow(RTCPSSRC)
+	if err != nil {
+		return err
+	}
+	for buffer := make([]byte, mtu); ; {
+		n, err := rtcpFlow.Read(buffer)
+		if err != nil {
+			return err
+		}
+		if _, _, err := g.rtcpReader.Read(buffer[:n], interceptor.Attributes{}); err != nil {
+			return err
+		}
+	}
+}
+
 func (g *gstWriter) Close() error {
 	return g.rtqSession.Close()
 }

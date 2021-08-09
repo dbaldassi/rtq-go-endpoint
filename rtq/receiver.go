@@ -11,9 +11,18 @@ import (
 	"github.com/lucas-clemente/quic-go"
 	"github.com/mengelbart/rtq-go"
 	gstsink "github.com/mengelbart/rtq-go-endpoint/internal/gstreamer-sink"
+	"github.com/pion/interceptor"
+	"github.com/pion/rtcp"
 )
 
-const mtu = 1200
+const (
+	mtu = 1200
+
+	// RTPSSRC and RTCPSSRC should at some point be negotiated via some
+	// signalling (e.g. SDP)
+	RTPSSRC  = 0
+	RTCPSSRC = 1
+)
 
 type Receiver struct {
 	Addr       string
@@ -48,6 +57,15 @@ func (r *Receiver) Receive(dst string) error {
 	}
 	log.Printf("created pipeline: '%v'\n", pipeline.String())
 
+	chain := interceptor.NewChain([]interceptor.Interceptor{})
+	streamReader := chain.BindRemoteStream(&interceptor.StreamInfo{
+		SSRC:         RTPSSRC,
+		RTCPFeedback: []interceptor.RTCPFeedback{},
+	}, interceptor.RTPReaderFunc(func(in []byte, attributes interceptor.Attributes) (int, interceptor.Attributes, error) {
+		pipeline.Push(in)
+		return len(in), nil, nil
+	}))
+
 	destroyed := make(chan struct{}, 1)
 	gstsink.HandleSinkEOS(func() {
 		pipeline.Destroy()
@@ -58,7 +76,7 @@ func (r *Receiver) Receive(dst string) error {
 	done := make(chan struct{}, 1)
 	errChan := make(chan error, 1)
 	go func() {
-		for buffer := make([]byte, mtu); ; {
+		for rtcpBound, buffer := false, make([]byte, mtu); ; {
 			n, err := rtqFlow.Read(buffer)
 			if err != nil {
 				if err == io.EOF {
@@ -67,7 +85,23 @@ func (r *Receiver) Receive(dst string) error {
 				}
 				errChan <- err
 			}
-			pipeline.Push(buffer[:n])
+			if _, _, err := streamReader.Read(buffer[:n], nil); err != nil {
+				errChan <- err
+			}
+			if !rtcpBound {
+				rtcpFlow, err := rtqSession.OpenWriteFlow(RTCPSSRC)
+				if err != nil {
+					errChan <- err
+				}
+				chain.BindRTCPWriter(interceptor.RTCPWriterFunc(func(pkts []rtcp.Packet, attributes interceptor.Attributes) (int, error) {
+					buf, err := rtcp.Marshal(pkts)
+					if err != nil {
+						return 0, err
+					}
+					return rtcpFlow.Write(buf)
+				}))
+				rtcpBound = true
+			}
 		}
 	}()
 	go gstsink.StartMainLoop()
