@@ -12,16 +12,12 @@ import (
 	"github.com/mengelbart/rtq-go"
 	gstsink "github.com/mengelbart/rtq-go-endpoint/internal/gstreamer-sink"
 	"github.com/pion/interceptor"
+	"github.com/pion/interceptor/pkg/scream"
 	"github.com/pion/rtcp"
 )
 
 const (
 	mtu = 1200
-
-	// RTPSSRC and RTCPSSRC should at some point be negotiated via some
-	// signalling (e.g. SDP)
-	RTPSSRC  = 0
-	RTCPSSRC = 1
 )
 
 type Receiver struct {
@@ -29,6 +25,7 @@ type Receiver struct {
 	TLSConfig  *tls.Config
 	QUICConfig *quic.Config
 	Codec      string
+	CC         string
 }
 
 func (r *Receiver) Receive(dst string) error {
@@ -57,10 +54,28 @@ func (r *Receiver) Receive(dst string) error {
 	}
 	log.Printf("created pipeline: '%v'\n", pipeline.String())
 
-	chain := interceptor.NewChain([]interceptor.Interceptor{})
+	var chain *interceptor.Chain
+	var rtcpfb []interceptor.RTCPFeedback
+
+	switch r.CC {
+	case SCReAM:
+		feedback, err := scream.NewReceiverInterceptor()
+		if err != nil {
+			return err
+		}
+		rtcpfb = []interceptor.RTCPFeedback{
+			{Type: "ack", Parameter: "ccfb"},
+		}
+		chain = interceptor.NewChain([]interceptor.Interceptor{feedback})
+
+	default:
+		rtcpfb = []interceptor.RTCPFeedback{}
+		chain = interceptor.NewChain([]interceptor.Interceptor{})
+	}
+
 	streamReader := chain.BindRemoteStream(&interceptor.StreamInfo{
 		SSRC:         RTPSSRC,
-		RTCPFeedback: []interceptor.RTCPFeedback{},
+		RTCPFeedback: rtcpfb,
 	}, interceptor.RTPReaderFunc(func(in []byte, attributes interceptor.Attributes) (int, interceptor.Attributes, error) {
 		pipeline.Push(in)
 		return len(in), nil, nil

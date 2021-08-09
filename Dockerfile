@@ -25,8 +25,8 @@ RUN go mod download
 
 COPY . .
 
-RUN go build -o /out/sender sender/main.go
-RUN go build -o /out/receiver receiver/main.go
+RUN go build -tags scream -o /out/sender sender/main.go
+RUN go build -tags scream -o /out/receiver receiver/main.go
 
 FROM martenseemann/quic-network-simulator-endpoint:latest
 

@@ -11,6 +11,7 @@ import (
 	"github.com/mengelbart/rtq-go"
 	gstsrc "github.com/mengelbart/rtq-go-endpoint/internal/gstreamer-src"
 	"github.com/pion/interceptor"
+	"github.com/pion/interceptor/pkg/scream"
 	"github.com/pion/rtp"
 )
 
@@ -19,6 +20,7 @@ type Sender struct {
 	TLSConfig  *tls.Config
 	QUICConfig *quic.Config
 	Codec      string
+	CC         string
 }
 
 func (s *Sender) Send(src string) error {
@@ -36,10 +38,30 @@ func (s *Sender) Send(src string) error {
 		return err
 	}
 
-	chain := interceptor.NewChain([]interceptor.Interceptor{})
+	var chain *interceptor.Chain
+	var rtcpfb []interceptor.RTCPFeedback
+
+	var cc *scream.SenderInterceptor
+
+	switch s.CC {
+	case SCReAM:
+		cc, err = scream.NewSenderInterceptor()
+		if err != nil {
+			return err
+		}
+		rtcpfb = []interceptor.RTCPFeedback{
+			{Type: "ack", Parameter: "ccfb"},
+		}
+		chain = interceptor.NewChain([]interceptor.Interceptor{cc})
+
+	default:
+		rtcpfb = []interceptor.RTCPFeedback{}
+		chain = interceptor.NewChain([]interceptor.Interceptor{})
+	}
+
 	streamWriter := chain.BindLocalStream(&interceptor.StreamInfo{
 		SSRC:         RTPSSRC,
-		RTCPFeedback: []interceptor.RTCPFeedback{},
+		RTCPFeedback: rtcpfb,
 	}, interceptor.RTPWriterFunc(func(header *rtp.Header, payload []byte, attributes interceptor.Attributes) (int, error) {
 		return rtpFlow.WriteRTP(header, payload)
 	}))
@@ -51,6 +73,7 @@ func (s *Sender) Send(src string) error {
 		rtqSession: rtqSession,
 		rtpWriter:  streamWriter,
 		rtcpReader: rtcpReader,
+		cc:         cc,
 	}
 	go func() {
 		err := writer.acceptFeedback()
@@ -110,6 +133,7 @@ type gstWriter struct {
 	pipeline      *gstsrc.Pipeline
 	rtcpReader    interceptor.RTCPReader
 	rtpWriter     interceptor.RTPWriter
+	cc            *scream.SenderInterceptor
 }
 
 func (g *gstWriter) Write(p []byte) (n int, err error) {
@@ -138,6 +162,17 @@ func (g *gstWriter) acceptFeedback() error {
 		}
 		if _, _, err := g.rtcpReader.Read(buffer[:n], interceptor.Attributes{}); err != nil {
 			return err
+		}
+		if g.cc != nil {
+			bitrate, err := g.cc.GetTargetBitrate(RTPSSRC)
+			if err != nil {
+				return err
+			}
+			if bitrate != g.targetBitrate && bitrate > 0 {
+				g.targetBitrate = bitrate
+				log.Printf("new target bitrate: %v\n", bitrate)
+				g.pipeline.SetBitRate(uint(bitrate / 1000)) // Gstreamer expects kbit/s
+			}
 		}
 	}
 }

@@ -22,6 +22,7 @@ import (
 func main() {
 	codec := flag.String("codec", endpoint.H264, "Video Codec")
 	transport := flag.String("transport", endpoint.RTQTransport, fmt.Sprintf("Transport to use, options: '%v', '%v'", endpoint.RTQTransport, endpoint.UDPTransport))
+	cc := flag.String("cc", "", fmt.Sprintf("Congestion Controller to use, options: '%v', '%v'", "", rtq.SCReAM))
 	flag.Parse()
 
 	files := flag.Args()
@@ -37,7 +38,7 @@ func main() {
 
 	switch *transport {
 	case endpoint.RTQTransport:
-		r, err = setupRTQReceiver(*codec)
+		r, err = setupRTQReceiver(*cc, *codec)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -54,7 +55,7 @@ func main() {
 	}
 }
 
-func setupRTQReceiver(codec string) (*rtq.Receiver, error) {
+func setupRTQReceiver(cc, codec string) (*rtq.Receiver, error) {
 	logFilename := os.Getenv("LOG_FILE")
 	if logFilename != "" {
 		logfile, err := os.Create(logFilename)
@@ -82,6 +83,7 @@ func setupRTQReceiver(codec string) (*rtq.Receiver, error) {
 		TLSConfig:  generateTLSConfig(),
 		QUICConfig: quicConf,
 		Codec:      codec,
+		CC:         cc,
 	}, nil
 }
 
