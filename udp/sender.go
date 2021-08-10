@@ -1,6 +1,7 @@
 package udp
 
 import (
+	"errors"
 	"io"
 	"log"
 	"net"
@@ -74,7 +75,7 @@ func (s *Sender) Send(src string) error {
 	}
 	go func() {
 		err := writer.acceptFeedback()
-		if err != nil && err != io.EOF {
+		if err != nil && err != io.EOF && !errors.Is(err, net.ErrClosed) {
 			// TODO: Handle error properly
 			panic(err)
 		}
@@ -100,7 +101,7 @@ func (s *Sender) Send(src string) error {
 		log.Println("got EOS, stopping pipeline")
 		err := writer.Close()
 		if err != nil {
-			log.Printf("failed to close rtq session: %s\n", err.Error())
+			log.Printf("failed to close udp writer: %s\n", err.Error())
 		}
 		err = chain.Close()
 		if err != nil {
@@ -126,7 +127,7 @@ func (s *Sender) Send(src string) error {
 
 type gstWriter struct {
 	targetBitrate int64
-	conn          net.Conn
+	conn          *net.UDPConn
 	pipeline      *gstsrc.Pipeline
 	rtcpReader    interceptor.RTCPReader
 	rtpWriter     interceptor.RTPWriter
@@ -171,5 +172,9 @@ func (g *gstWriter) acceptFeedback() error {
 }
 
 func (g *gstWriter) Close() error {
+	_, err := g.conn.Write([]byte("eos"))
+	if err != nil {
+		return err
+	}
 	return g.conn.Close()
 }

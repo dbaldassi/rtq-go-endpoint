@@ -1,6 +1,7 @@
 package udp
 
 import (
+	"bytes"
 	"io"
 	"log"
 	"net"
@@ -84,6 +85,10 @@ func (r *Receiver) Receive(dst string) error {
 					break
 				}
 				errChan <- err
+			}
+			if res := bytes.Compare(buffer[:n], []byte("eos")); res == 0 {
+				close(done)
+				break
 			}
 			if _, _, err := streamReader.Read(buffer[:n], nil); err != nil {
 				errChan <- err
