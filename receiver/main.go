@@ -8,6 +8,7 @@ import (
 	"encoding/pem"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"math/big"
 	"os"
@@ -56,10 +57,22 @@ func main() {
 			log.Fatal(err)
 		}
 	case endpoint.UDPTransport:
-		r = &udp.Receiver{
-			Addr:  *addr,
-			Codec: *codec,
-			CC:    *cc,
+		rtpLogger, err := utils.GetRTPLogWriter()
+		if err != nil {
+			log.Fatal(err)
+		}
+		r, err = udp.NewReceiver(
+			*addr,
+			udp.ReceiverCodec(*codec),
+			udp.ReceiverCongestionControl(*cc),
+			udp.ReceiverRTCPInLogWriter(utils.NopCloser{Writer: io.Discard}),
+			udp.ReceiverRTCPOutLogWriter(rtpLogger("rtcp_out")),
+			udp.ReceiverRTPInLogWriter(rtpLogger("rtp_in")),
+			udp.ReceiverRTPOutLogWriter(utils.NopCloser{Writer: io.Discard}),
+		)
+		if err != nil {
+			log.Printf("could not setup receiver: %v\n", err)
+			os.Exit(1)
 		}
 	default:
 		log.Fatalf("unknown transport: %v\n", *transport)
@@ -84,13 +97,21 @@ func setupRTQReceiver(addr, cc, codec string) (*rtq.Receiver, error) {
 	if qlogWriter != nil {
 		quicConf.Tracer = qlog.NewTracer(qlogWriter)
 	}
-	return &rtq.Receiver{
-		Addr:       addr,
-		TLSConfig:  generateTLSConfig(),
-		QUICConfig: quicConf,
-		Codec:      codec,
-		CC:         cc,
-	}, nil
+	rtpLogger, err := utils.GetRTPLogWriter()
+	if err != nil {
+		return nil, fmt.Errorf("could not get rtp/rtcp log writer: %w", err)
+	}
+	return rtq.NewReceiver(
+		addr,
+		generateTLSConfig(),
+		quicConf,
+		rtq.ReceiverCodec(codec),
+		rtq.ReceiverCongestionControl(cc),
+		rtq.ReceiverRTCPInLogWriter(utils.NopCloser{Writer: io.Discard}),
+		rtq.ReceiverRTCPOutLogWriter(rtpLogger("rtcp_out")),
+		rtq.ReceiverRTPInLogWriter(rtpLogger("rtp_in")),
+		rtq.ReceiverRTPOutLogWriter(utils.NopCloser{Writer: io.Discard}),
+	)
 }
 
 // Setup a bare-bones TLS config for the server

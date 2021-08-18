@@ -11,6 +11,14 @@ import (
 	"github.com/lucas-clemente/quic-go/logging"
 )
 
+type NopCloser struct {
+	io.Writer
+}
+
+func (c NopCloser) Close() error {
+	return nil
+}
+
 type bufferedWriteCloser struct {
 	*bufio.Writer
 	io.Closer
@@ -38,10 +46,10 @@ func GetQLOGWriter() (func(perspective logging.Perspective, connID []byte) io.Wr
 		return nil, nil
 	}
 	_, err := os.Stat(qlogDir)
-	if err!=nil {
+	if err != nil {
 		if os.IsNotExist(err) {
 			if err := os.MkdirAll(qlogDir, 0o666); err != nil {
-				return nil, fmt.Errorf("failed to create qlog dir %s: %s", qlogDir, err.Error())
+				return nil, fmt.Errorf("failed to create qlog dir %s: %v", qlogDir, err)
 			}
 		} else {
 			return nil, err
@@ -51,10 +59,39 @@ func GetQLOGWriter() (func(perspective logging.Perspective, connID []byte) io.Wr
 		path := fmt.Sprintf("%s/%x.qlog", strings.TrimRight(qlogDir, "/"), connID)
 		f, err := os.Create(path)
 		if err != nil {
-			log.Printf("Failed to create qlog file %s: %s", path, err.Error())
+			log.Printf("failed to create qlog file %s: %v", path, err)
 			return nil
 		}
-		log.Printf("Created qlog file: %s\n", path)
+		log.Printf("created qlog file: %s\n", path)
+		return newBufferedWriteCloser(bufio.NewWriter(f), f)
+	}, nil
+}
+
+func GetRTPLogWriter() (func(string) io.WriteCloser, error) {
+	rtpLogDir := os.Getenv("RTPLOGDIR")
+	if len(rtpLogDir) == 0 {
+		return func(string) io.WriteCloser {
+			return NopCloser{Writer: os.Stdout}
+		}, nil
+	}
+	_, err := os.Stat(rtpLogDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			if err := os.MkdirAll(rtpLogDir, os.ModePerm); err != nil {
+				return nil, fmt.Errorf("failed to create qlog dir %s: %v", rtpLogDir, err)
+			}
+		} else {
+			return nil, err
+		}
+	}
+	return func(stream string) io.WriteCloser {
+		path := fmt.Sprintf("%s/%s.log", strings.TrimRight(rtpLogDir, "/"), stream)
+		f, err := os.Create(path)
+		if err != nil {
+			log.Printf("failed to create rtp/rtcp log file %s: %v", path, err)
+			return nil
+		}
+		log.Printf("created rtp/rtcp log file: %s", path)
 		return newBufferedWriteCloser(bufio.NewWriter(f), f)
 	}, nil
 }
