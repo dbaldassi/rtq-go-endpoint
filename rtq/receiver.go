@@ -11,6 +11,7 @@ import (
 	"github.com/lucas-clemente/quic-go"
 	"github.com/mengelbart/rtq-go"
 	gstsink "github.com/mengelbart/rtq-go-endpoint/internal/gstreamer-sink"
+	"github.com/mengelbart/rtq-go-endpoint/internal/utils"
 	"github.com/pion/interceptor"
 	"github.com/pion/interceptor/pkg/scream"
 	"github.com/pion/rtcp"
@@ -26,6 +27,76 @@ type Receiver struct {
 	QUICConfig *quic.Config
 	Codec      string
 	CC         string
+
+	RTCPInLog  io.WriteCloser
+	RTCPOutLog io.WriteCloser
+	RTPInLog   io.WriteCloser
+	RTPOutLog  io.WriteCloser
+}
+
+type ReceiverOption func(*Receiver) error
+
+func ReceiverCodec(codec string) ReceiverOption {
+	return func(r *Receiver) error {
+		r.Codec = codec
+		return nil
+	}
+}
+
+func ReceiverCongestionControl(cc string) ReceiverOption {
+	return func(r *Receiver) error {
+		r.CC = cc
+		return nil
+	}
+}
+
+func ReceiverRTCPInLogWriter(w io.WriteCloser) ReceiverOption {
+	return func(r *Receiver) error {
+		r.RTCPInLog = w
+		return nil
+	}
+}
+
+func ReceiverRTCPOutLogWriter(w io.WriteCloser) ReceiverOption {
+	return func(r *Receiver) error {
+		r.RTCPOutLog = w
+		return nil
+	}
+}
+
+func ReceiverRTPInLogWriter(w io.WriteCloser) ReceiverOption {
+	return func(r *Receiver) error {
+		r.RTPInLog = w
+		return nil
+	}
+}
+
+func ReceiverRTPOutLogWriter(w io.WriteCloser) ReceiverOption {
+	return func(r *Receiver) error {
+		r.RTPOutLog = w
+		return nil
+	}
+}
+
+func NewReceiver(addr string, t *tls.Config, q *quic.Config, opts ...ReceiverOption) (*Receiver, error) {
+	r := &Receiver{
+		Addr:       addr,
+		TLSConfig:  t,
+		QUICConfig: q,
+		Codec:      "h264",
+		CC:         "no-cc",
+		RTCPInLog:  os.Stdout,
+		RTCPOutLog: os.Stdout,
+		RTPInLog:   os.Stdout,
+		RTPOutLog:  os.Stdout,
+	}
+	for _, opt := range opts {
+		err := opt(r)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return r, nil
 }
 
 func (r *Receiver) Receive(dst string) error {
@@ -54,7 +125,8 @@ func (r *Receiver) Receive(dst string) error {
 	}
 	log.Printf("created pipeline: '%v'\n", pipeline.String())
 
-	var chain *interceptor.Chain
+	rtpLog := utils.NewRTPLogInterceptor(r.RTCPInLog, r.RTCPOutLog, r.RTPInLog, r.RTPInLog)
+	interceptors := []interceptor.Interceptor{rtpLog}
 	var rtcpfb []interceptor.RTCPFeedback
 
 	switch r.CC {
@@ -66,12 +138,13 @@ func (r *Receiver) Receive(dst string) error {
 		rtcpfb = []interceptor.RTCPFeedback{
 			{Type: "ack", Parameter: "ccfb"},
 		}
-		chain = interceptor.NewChain([]interceptor.Interceptor{feedback})
+		interceptors = append(interceptors, feedback)
 
 	default:
 		rtcpfb = []interceptor.RTCPFeedback{}
-		chain = interceptor.NewChain([]interceptor.Interceptor{})
 	}
+
+	chain := interceptor.NewChain(interceptors)
 
 	streamReader := chain.BindRemoteStream(&interceptor.StreamInfo{
 		SSRC:         RTPSSRC,
