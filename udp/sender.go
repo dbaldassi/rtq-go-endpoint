@@ -168,7 +168,7 @@ func (s *Sender) Send(src string) error {
 
 	done := make(chan struct{}, 1)
 	destroyed := make(chan struct{}, 1)
-	gstsrc.HandleSinkEOS(func() {
+	gstsrc.HandleSrcEOS(func() {
 		log.Println("got EOS, stopping pipeline")
 		err := writer.Close()
 		if err != nil {
