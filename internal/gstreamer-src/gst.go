@@ -93,7 +93,7 @@ func (p *Pipeline) Destroy() {
 
 var eosHandler func()
 
-func HandleSinkEOS(handler func()) {
+func HandleSrcEOS(handler func()) {
 	eosHandler = handler
 }
 
