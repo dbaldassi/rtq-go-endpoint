@@ -186,19 +186,19 @@ func (r *RTPLogInterceptor) loop() {
 	for {
 		select {
 		case p := <-r.rtcpIn:
-			if _, err := fmt.Fprintf(r.rtcpInStream, "in: %s\n", p); err != nil {
+			if _, err := fmt.Fprintf(r.rtcpInStream, "in:\t%s\n", p); err != nil {
 				log.Printf("could not dump RTCP packet %v", err)
 			}
 		case p := <-r.rtcpOut:
-			if _, err := fmt.Fprintf(r.rtcpOutStream, "out: %s\n", p); err != nil {
+			if _, err := fmt.Fprintf(r.rtcpOutStream, "out:\t%s\n", p); err != nil {
 				log.Printf("could not dump RTCP packet %v", err)
 			}
 		case p := <-r.rtpIn:
-			if _, err := fmt.Fprintf(r.rtpInStream, "in: %s\n", p); err != nil {
+			if _, err := fmt.Fprintf(r.rtpInStream, "in:\t%s\n", p); err != nil {
 				log.Printf("could not dump RTP packet %v", err)
 			}
 		case p := <-r.rtpOut:
-			if _, err := fmt.Fprintf(r.rtpOutStream, "out: %s\n", p); err != nil {
+			if _, err := fmt.Fprintf(r.rtpOutStream, "out:\t%s\n", p); err != nil {
 				log.Printf("could not dump RTP packet %v", err)
 			}
 		case <-r.done:
