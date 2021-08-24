@@ -140,6 +140,11 @@ func (r *Receiver) Receive(dst string) error {
 
 	destroyed := make(chan struct{}, 1)
 	gstsink.HandleSinkEOS(func() {
+		log.Println("got EOS, stopping pipeline")
+		err := chain.Close()
+		if err != nil {
+			log.Printf("failed to close interceptor chain: %s\n", err.Error())
+		}
 		pipeline.Destroy()
 		destroyed <- struct{}{}
 	})
@@ -189,8 +194,8 @@ func (r *Receiver) Receive(dst string) error {
 		log.Printf("got interrupt signal")
 	}
 
-	log.Println("stopping pipeline")
 	pipeline.Stop()
+
 	<-destroyed
 	log.Println("destroyed pipeline, exiting")
 	return err
