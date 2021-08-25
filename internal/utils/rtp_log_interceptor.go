@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"os"
 	"time"
 
 	"github.com/pion/interceptor"
@@ -162,9 +163,11 @@ func (r *RTPLogInterceptor) Close() error {
 		r.rtpInStream,
 		r.rtpOutStream,
 	} {
-		err := c.Close()
-		if err != nil {
-			return err
+		if c != os.Stdout {
+			err := c.Close()
+			if err != nil {
+				return err
+			}
 		}
 	}
 	return nil

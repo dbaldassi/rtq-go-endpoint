@@ -1,7 +1,7 @@
 package endpoint
 
 const (
-	RTQTransport = "rtq"
+	RTQTransport = "quic"
 	UDPTransport = "udp"
 )
 
