@@ -15,7 +15,7 @@ import (
 
 	"github.com/lucas-clemente/quic-go"
 	"github.com/lucas-clemente/quic-go/qlog"
-	endpoint "github.com/mengelbart/rtq-go-endpoint"
+	"github.com/mengelbart/rtq-go-endpoint/endpoint"
 	"github.com/mengelbart/rtq-go-endpoint/internal/utils"
 	"github.com/mengelbart/rtq-go-endpoint/rtq"
 	"github.com/mengelbart/rtq-go-endpoint/udp"
