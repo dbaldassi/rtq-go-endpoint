@@ -12,7 +12,14 @@ on:
 jobs:
   endpoint:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [newreno, nocc, scream, scream-newreno, udp-nocc, udp-scream]
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
       - name: Docker meta
         id: meta
         uses: docker/metadata-action@v3
@@ -20,18 +27,23 @@ jobs:
           images: engelbart/rtq-go-endpoint
           tags: |
             type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{raw}}
+            type=semver,pattern={{raw}},suffix=-${{ matrix.variant }}
 
       - name: Login to DockerHub
         if: github.event_name != 'pull_request'
-        uses: docker/login-action@v1 
+        uses: docker/login-action@v1
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Apply variants patch
+        run: |
+          ls -la
+          (test -f variants/${{ matrix.variant }}/*.patch && git apply variants/${{ matrix.variant }}/*.patch) || echo no patch, skipping
+
       - name: Build and push Docker images
         uses: docker/build-push-action@v2.5.0
         with:
+          context: .
           push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
+          tags: ${{ steps.meta.outputs.tags }}-${{ matrix.variant }}
