@@ -1,0 +1,15 @@
+diff --git a/tools/run_endpoint.sh b/tools/run_endpoint.sh
+index daea9a1..fed42af 100644
+--- a/tools/run_endpoint.sh
++++ b/tools/run_endpoint.sh
+@@ -10,8 +10,8 @@ if [ "$ROLE" == "sender" ]; then
+     echo "Starting RTQ sender..."
+     echo "Sending video to $RECEIVER"
+     echo "Sender params: $SENDER_PARAMS"
+-    QUIC_GO_LOG_LEVEL=error ./rtq send -addr $RECEIVER $SENDER_PARAMS $VIDEOS
++    QUIC_GO_LOG_LEVEL=error ./rtq send -addr $RECEIVER -cc scream -transport udp $SENDER_PARAMS $VIDEOS
+ else
+     echo "Running RTQ receiver."
+-    QUIC_GO_LOG_LEVEL=error ./rtq receive $DESTINATION
++    QUIC_GO_LOG_LEVEL=error ./rtq receive -cc scream -transport udp $DESTINATION
+ fi
