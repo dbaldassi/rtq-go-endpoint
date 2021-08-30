@@ -25,8 +25,7 @@ RUN go mod download
 
 COPY . .
 
-RUN go build -tags scream -o /out/sender sender/main.go
-RUN go build -tags scream -o /out/receiver receiver/main.go
+RUN go build -tags scream -o /out/rtq main.go
 
 FROM martenseemann/quic-network-simulator-endpoint:latest
 
@@ -47,8 +46,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -yqq \
         gstreamer1.0-pulseaudio
 
 COPY --from=build \
-        /out/sender \
-        /out/receiver \
+        /out/rtq \
         /src/tools/run_endpoint.sh \
         ./
 
