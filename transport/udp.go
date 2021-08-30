@@ -10,6 +10,7 @@ import (
 
 type UDP struct {
 	*net.UDPConn
+	addr    net.Addr
 	writers []*UDPWriteFlowCloser
 }
 
@@ -40,6 +41,7 @@ func NewUDPClient(addr string) (*UDP, error) {
 		return nil, err
 	}
 	return &UDP{
+		addr:    a,
 		UDPConn: conn,
 	}, nil
 }
@@ -51,6 +53,7 @@ func (u *UDP) Writer(id uint64) (*UDPWriteFlowCloser, error) {
 }
 
 func (u *UDP) setAddr(a net.Addr) {
+	u.addr = a
 	for _, w := range u.writers {
 		w.addr = a
 	}
@@ -58,10 +61,6 @@ func (u *UDP) setAddr(a net.Addr) {
 
 func (u *UDP) Reader(id uint64) (*UDPReadFlowCloser, error) {
 	return &UDPReadFlowCloser{UDP: u, setUDPAddr: u.setAddr}, nil
-}
-
-func (u *UDP) Close() error {
-	return u.UDPConn.Close()
 }
 
 type UDPWriteFlowCloser struct {
@@ -90,7 +89,7 @@ func (u *UDPWriteFlowCloser) Close() error {
 	if err != nil {
 		return err
 	}
-	return u.UDP.Close()
+	return u.UDPConn.Close()
 }
 
 type UDPReadFlowCloser struct {
@@ -101,7 +100,10 @@ type UDPReadFlowCloser struct {
 
 func (u *UDPReadFlowCloser) Read(p []byte) (n int, err error) {
 	n, addr, err := u.UDPConn.ReadFrom(p)
-	u.setUDPAddr(addr)
+	if addr != u.addr {
+		u.addr = addr
+		u.setUDPAddr(addr)
+	}
 	return n, err
 }
 

@@ -2,11 +2,9 @@ package rtc
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"io"
 	"log"
-	"net"
 	"time"
 
 	gstsink "github.com/mengelbart/rtq-go-endpoint/internal/gstreamer-sink"
@@ -16,14 +14,8 @@ import (
 	"github.com/pion/rtcp"
 )
 
-type RTCPWriteCloser interface {
+type RTCPWriter interface {
 	WriteRTCP(pkts []rtcp.Packet) (int, error)
-	Close() error
-}
-
-type RTPReadCloser interface {
-	io.Reader
-	io.Closer
 }
 
 type Receiver struct {
@@ -31,8 +23,8 @@ type Receiver struct {
 	dst   string
 	mtu   int
 
-	rtcpConn RTCPWriteCloser
-	rtpConn  RTPReadCloser
+	rtcpConn RTCPWriter
+	rtpConn  io.Reader
 
 	streamInfo   *interceptor.StreamInfo
 	interceptors interceptor.Registry
@@ -41,7 +33,9 @@ type Receiver struct {
 
 	pipeline *gstsink.Pipeline
 
-	closed chan struct{}
+	packet  chan []byte
+	closeC  chan struct{}
+	notifyC chan<- struct{}
 }
 
 type ReceiverOption func(*Receiver) error
@@ -53,7 +47,7 @@ func ReceiverCodec(codec string) ReceiverOption {
 	}
 }
 
-func NewReceiver(r RTPReadCloser, w RTCPWriteCloser, opts ...ReceiverOption) (*Receiver, error) {
+func NewReceiver(r io.Reader, w RTCPWriter, opts ...ReceiverOption) (*Receiver, error) {
 	recv := &Receiver{
 		codec:    "h264",
 		dst:      "autovideosink",
@@ -64,7 +58,8 @@ func NewReceiver(r RTPReadCloser, w RTCPWriteCloser, opts ...ReceiverOption) (*R
 			SSRC: 0,
 		},
 		interceptors: interceptor.Registry{},
-		closed:       make(chan struct{}),
+		packet:       make(chan []byte, 1000),
+		closeC:       make(chan struct{}),
 	}
 	for _, opt := range opts {
 		err := opt(recv)
@@ -101,21 +96,10 @@ func (r *Receiver) Receive() error {
 		return err
 	}
 	r.pipeline = pipeline
+
+	eosC := make(chan struct{})
 	gstsink.HandleSinkEOS(func() {
-		err := i.Close()
-		if err != nil {
-			log.Println(err)
-		}
-		err = r.rtpConn.Close()
-		if err != nil {
-			log.Println(err)
-		}
-		err = r.rtcpConn.Close()
-		if err != nil {
-			log.Println(err)
-		}
-		r.pipeline.Destroy()
-		close(r.closed)
+		close(eosC)
 	})
 
 	r.rtpReader = i.BindRemoteStream(r.streamInfo, interceptor.RTCPReaderFunc(func(in []byte, attributes interceptor.Attributes) (int, interceptor.Attributes, error) {
@@ -127,23 +111,20 @@ func (r *Receiver) Receive() error {
 		return r.rtcpConn.WriteRTCP(pkts)
 	}))
 
+	connErrC := make(chan error)
 	go func() {
 		for buffer := make([]byte, r.mtu); ; {
 			n, err := r.rtpConn.Read(buffer)
 			if err != nil {
-				if err == io.EOF || errors.Is(err, net.ErrClosed) {
-					r.Close()
-					return
-				}
-				log.Printf("failed to read from rtpConn: %v\n", err)
+				connErrC <- err
 				return
 			}
 			if res := bytes.Compare(buffer[:n], []byte("eos")); res == 0 {
-				r.Close()
-				break
+				connErrC <- fmt.Errorf("connection got EOS")
+				return
 			}
 			if _, _, err := r.rtpReader.Read(buffer[:n], nil); err != nil {
-				log.Printf("rtpReader failed to read received buffer: %v\n", err)
+				connErrC <- fmt.Errorf("rtpReader failed to read received buffer: %w", err)
 				return
 			}
 		}
@@ -152,31 +133,33 @@ func (r *Receiver) Receive() error {
 	r.pipeline.Start()
 	go gstsink.StartMainLoop()
 
+	go func() {
+		select {
+		case err := <-connErrC:
+			log.Printf("got error from connection reader: %v\n", err)
+			r.pipeline.Stop()
+
+		case <-r.closeC:
+			r.pipeline.Stop()
+		}
+		select {
+		case <-eosC:
+		case <-time.After(3 * time.Second):
+			log.Printf("timeout")
+		}
+		if r.notifyC != nil {
+			r.notifyC <- struct{}{}
+		}
+	}()
+
 	return nil
 }
 
 func (r *Receiver) NotifyDone(c chan<- struct{}) {
-	go func() {
-		<-r.closed
-		c <- struct{}{}
-	}()
-}
-
-func (r *Receiver) isClosed() bool {
-	select {
-	case <-r.closed:
-		return true
-	default:
-		return false
-	}
+	r.notifyC = c
 }
 
 func (r *Receiver) Close() error {
-	r.pipeline.Stop()
-	select {
-	case <-time.After(2 * time.Second):
-		return fmt.Errorf("sender close timed out after 2 seconds")
-	case <-r.closed:
-	}
+	close(r.closeC)
 	return nil
 }

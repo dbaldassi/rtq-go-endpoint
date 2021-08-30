@@ -14,14 +14,8 @@ import (
 	"github.com/pion/rtp"
 )
 
-type RTPWriteCloser interface {
+type RTPWriter interface {
 	WriteRTP(header *rtp.Header, payload []byte) (int, error)
-	Close() error
-}
-
-type RTCPReadCloser interface {
-	io.Reader
-	io.Closer
 }
 
 type Sender struct {
@@ -29,18 +23,22 @@ type Sender struct {
 	src   string
 	mtu   int
 
-	rtpConn  RTPWriteCloser
-	rtcpConn RTCPReadCloser
+	rtpConn  RTPWriter
+	rtcpConn io.Reader
 
-	streamInfo   *interceptor.StreamInfo
-	interceptors interceptor.Registry
-	rtpWriter    interceptor.RTPWriter
-	rtcpReader   interceptor.RTCPReader
+	streamInfo *interceptor.StreamInfo
+	ir         interceptor.Registry
+	i          interceptor.Interceptor
+
+	rtpWriter  interceptor.RTPWriter
+	rtcpReader interceptor.RTCPReader
 
 	pipeline *gstsrc.Pipeline
 
-	rtpConnClosed bool
-	closed        chan struct{}
+	packet       chan rtp.Packet
+	closeC       chan struct{}
+	feedbackErrC chan error
+	notifyC      chan<- struct{}
 }
 
 type SenderOption func(*Sender) error
@@ -52,7 +50,7 @@ func SenderCodec(codec string) SenderOption {
 	}
 }
 
-func NewSender(w RTPWriteCloser, r RTCPReadCloser, opts ...SenderOption) (*Sender, error) {
+func NewSender(w RTPWriter, r io.Reader, opts ...SenderOption) (*Sender, error) {
 	s := &Sender{
 		codec:    "h264",
 		src:      "videotestsrc",
@@ -62,8 +60,11 @@ func NewSender(w RTPWriteCloser, r RTCPReadCloser, opts ...SenderOption) (*Sende
 		streamInfo: &interceptor.StreamInfo{
 			SSRC: 0,
 		},
-		interceptors: interceptor.Registry{},
-		closed:       make(chan struct{}),
+		ir: interceptor.Registry{},
+
+		packet:       make(chan rtp.Packet),
+		feedbackErrC: make(chan error),
+		closeC:       make(chan struct{}),
 	}
 	for _, opt := range opts {
 		err := opt(s)
@@ -83,26 +84,23 @@ func (s *Sender) ConfigureSCReAMInterceptor() error {
 		Type:      "ack",
 		Parameter: "ccfb",
 	})
-	s.interceptors.Add(cc)
+	s.ir.Add(cc)
 	return nil
 }
 
 func (s *Sender) ConfigureRTPLogInterceptor(rtcpIn, rtcpOut, rtpIn, rtpOut io.WriteCloser) {
 	i := utils.NewRTPLogInterceptor(rtcpIn, rtcpOut, rtpIn, rtpOut)
-	s.interceptors.Add(i)
+	s.ir.Add(i)
 }
 
 func (s *Sender) Write(p []byte) (n int, err error) {
-	if s.rtpConnClosed {
-		log.Println("invalid write on closed sender")
-		return len(p), nil
-	}
 	var pkt rtp.Packet
 	err = pkt.Unmarshal(p)
 	if err != nil {
 		return 0, err
 	}
-	return s.rtpWriter.Write(&pkt.Header, p[pkt.Header.MarshalSize():], nil)
+	s.packet <- pkt
+	return len(p), nil
 }
 
 func (s *Sender) AcceptFeedback() error {
@@ -114,14 +112,10 @@ func (s *Sender) AcceptFeedback() error {
 		for buffer := make([]byte, s.mtu); ; {
 			n, err := s.rtcpConn.Read(buffer)
 			if err != nil {
-				if err != io.EOF {
-					log.Println(err)
-				}
-				return
+				s.feedbackErrC <- err
 			}
 			if _, _, err := s.rtcpReader.Read(buffer[:n], interceptor.Attributes{}); err != nil {
-				log.Println(err)
-				return
+				s.feedbackErrC <- err
 			}
 		}
 	}()
@@ -129,24 +123,34 @@ func (s *Sender) AcceptFeedback() error {
 }
 
 func (s *Sender) Start() error {
-	i := s.interceptors.Build()
+	i := s.ir.Build()
+	s.i = i
 
-	s.rtpWriter = i.BindLocalStream(s.streamInfo, interceptor.RTPWriterFunc(func(header *rtp.Header, payload []byte, attributes interceptor.Attributes) (int, error) {
+	s.rtpWriter = s.i.BindLocalStream(s.streamInfo, interceptor.RTPWriterFunc(func(header *rtp.Header, payload []byte, attributes interceptor.Attributes) (int, error) {
 		n, err := s.rtpConn.WriteRTP(header, payload)
+
 		if err != nil {
 			if netErr, ok := err.(net.Error); ok && !netErr.Temporary() || err.Error() == "Application error 0x0: eos" {
-				fmt.Printf("err: %v, closing pipeline", err)
-				s.Close()
 				return n, err
 			}
 			log.Printf("failed to write to rtpWriter: %T: %v\n", err, err)
 		}
+
 		return n, err
 	}))
 
-	s.rtcpReader = i.BindRTCPReader(interceptor.RTCPReaderFunc(func(in []byte, attributes interceptor.Attributes) (int, interceptor.Attributes, error) {
+	s.rtcpReader = s.i.BindRTCPReader(interceptor.RTCPReaderFunc(func(in []byte, attributes interceptor.Attributes) (int, interceptor.Attributes, error) {
 		return len(in), nil, nil
 	}))
+
+	errC := make(chan error)
+	iw := newInterceptorWriter(s.rtpWriter, s.packet, errC)
+	go func() {
+		err := iw.run()
+		if err != nil {
+			errC <- err
+		}
+	}()
 
 	pipeline, err := gstsrc.NewPipeline(s.codec, s.src, s)
 	if err != nil {
@@ -154,22 +158,10 @@ func (s *Sender) Start() error {
 	}
 	s.pipeline = pipeline
 
+	eosC := make(chan struct{})
 	gstsrc.HandleSrcEOS(func() {
-		log.Println("EOS")
-		err := i.Close()
-		if err != nil {
-			log.Println(err)
-		}
-		err = s.rtpConn.Close()
-		if err != nil {
-			log.Println(err)
-		}
-		err = s.rtcpConn.Close()
-		if err != nil {
-			log.Println(err)
-		}
-		pipeline.Destroy()
-		close(s.closed)
+		close(s.packet)
+		close(eosC)
 	})
 
 	s.pipeline.SetSSRC(uint(s.streamInfo.SSRC))
@@ -177,34 +169,82 @@ func (s *Sender) Start() error {
 
 	go gstsrc.StartMainLoop()
 
+	go func() {
+		select {
+		case <-eosC:
+			log.Println("eos")
+		case err := <-errC:
+			log.Printf("got error from interceptorWriter: %v\n", err)
+			go func() {
+				for range s.packet {
+				}
+			}()
+			s.pipeline.Stop()
+		case err := <-s.feedbackErrC:
+			log.Printf("got error from feedback Acceptor: %v\n", err)
+			s.pipeline.Stop()
+		case <-s.closeC:
+			s.pipeline.Stop()
+		}
+		iw.close()
+		s.i.Close()
+		select {
+		case <-eosC:
+		case <-time.After(3 * time.Second):
+			log.Printf("timeout")
+		}
+		if s.notifyC != nil {
+			s.notifyC <- struct{}{}
+		}
+	}()
+
 	return nil
 }
 
 func (s *Sender) NotifyDone(c chan<- struct{}) {
-	go func() {
-		<-s.closed
-		c <- struct{}{}
-	}()
-}
-
-func (s *Sender) isClosed() bool {
-	select {
-	case <-s.closed:
-		return true
-	default:
-		return false
-	}
+	s.notifyC = c
 }
 
 func (s *Sender) Close() error {
-	if s.isClosed() {
-		return nil
-	}
-	s.pipeline.Stop()
-	select {
-	case <-time.After(2 * time.Second):
-		return fmt.Errorf("sender close timed out after 2 seconds")
-	case <-s.closed:
-	}
+	close(s.closeC)
 	return nil
+}
+
+type interceptorWriter struct {
+	w      interceptor.RTPWriter
+	packet <-chan rtp.Packet
+	done   chan struct{}
+}
+
+func newInterceptorWriter(w interceptor.RTPWriter, c <-chan rtp.Packet, errC chan<- error) *interceptorWriter {
+	return &interceptorWriter{
+		w:      w,
+		packet: c,
+		done:   make(chan struct{}),
+	}
+}
+
+func (i *interceptorWriter) run() error {
+	defer close(i.done)
+	for {
+		select {
+		case p := <-i.packet:
+			_, err := i.w.Write(&p.Header, p.Payload, nil)
+			if err != nil {
+				return err
+			}
+
+		case <-i.done:
+			return nil
+		}
+	}
+}
+
+func (i *interceptorWriter) close() {
+	select {
+	case <-i.done:
+		return
+	default:
+		i.done <- struct{}{}
+	}
 }

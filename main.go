@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/signal"
@@ -28,7 +29,7 @@ const (
 )
 
 func main() {
-	defer fmt.Println("END MAIN")
+	defer log.Println("END MAIN")
 
 	sendCmd := flag.NewFlagSet("send", flag.ExitOnError)
 	receiveCmd := flag.NewFlagSet("receive", flag.ExitOnError)
@@ -65,8 +66,9 @@ func main() {
 }
 
 func send(proto, remote, codec, rtcc string) {
-	var w rtc.RTPWriteCloser
-	var r rtc.RTCPReadCloser
+	var w rtc.RTPWriter
+	var r io.Reader
+	var cancel func() error
 	switch proto {
 	case QUIC:
 
@@ -82,6 +84,7 @@ func send(proto, remote, codec, rtcc string) {
 		if err != nil {
 			log.Fatalf("failed to open RTQ read flow: %v", err)
 		}
+		cancel = q.Close
 
 	case UDP:
 
@@ -89,7 +92,7 @@ func send(proto, remote, codec, rtcc string) {
 		if err != nil {
 			log.Fatalf("failed to open UDP session: %v", err)
 		}
-		w, err = q.Writer(0)
+		wr, err := q.Writer(0)
 		if err != nil {
 			log.Fatalf("failed to open UDP write flow: %v", err)
 		}
@@ -97,6 +100,8 @@ func send(proto, remote, codec, rtcc string) {
 		if err != nil {
 			log.Fatalf("failed to open UDP read flow: %v", err)
 		}
+		w = wr
+		cancel = wr.Close
 
 	default:
 		log.Fatalf("unknown transport protocol: %v", proto)
@@ -121,7 +126,7 @@ func send(proto, remote, codec, rtcc string) {
 			log.Fatal(err)
 		}
 	default:
-		fmt.Printf("unknown cc: %v\n", rtcc)
+		log.Printf("unknown cc: %v\n", rtcc)
 	}
 
 	done := make(chan struct{})
@@ -144,11 +149,16 @@ func send(proto, remote, codec, rtcc string) {
 	if err != nil {
 		log.Fatalf("failed to close sender %v", err)
 	}
+	err = cancel()
+	if err != nil {
+		log.Fatalf("failed to close transport %v", err)
+	}
 }
 
 func receive(proto, remote, codec, rtcc string) {
-	var w rtc.RTCPWriteCloser
-	var r rtc.RTPReadCloser
+	var w rtc.RTCPWriter
+	var r io.Reader
+	var cancel func() error
 	switch proto {
 	case QUIC:
 
@@ -164,6 +174,7 @@ func receive(proto, remote, codec, rtcc string) {
 		if err != nil {
 			log.Fatalf("failed to open RTQ write flow: %v", err)
 		}
+		cancel = q.Close
 
 	case UDP:
 
@@ -171,7 +182,7 @@ func receive(proto, remote, codec, rtcc string) {
 		if err != nil {
 			log.Fatalf("failed to open UDP session: %v", err)
 		}
-		r, err = u.Reader(0)
+		rr, err := u.Reader(0)
 		if err != nil {
 			log.Fatalf("failed to open UDP read flow: %v", err)
 		}
@@ -179,6 +190,8 @@ func receive(proto, remote, codec, rtcc string) {
 		if err != nil {
 			log.Fatalf("failed to open UDP write flow: %v", err)
 		}
+		r = rr
+		cancel = rr.Close
 
 	default:
 		log.Fatalf("unknown transport protocol: %v", proto)
@@ -195,7 +208,7 @@ func receive(proto, remote, codec, rtcc string) {
 	case SCREAM:
 		recv.ConfigureSCReAMInterceptor()
 	default:
-		fmt.Printf("unknown cc: %v\n", rtcc)
+		log.Printf("unknown cc: %v\n", rtcc)
 	}
 
 	done := make(chan struct{})
@@ -214,6 +227,10 @@ func receive(proto, remote, codec, rtcc string) {
 		err = recv.Close()
 		if err != nil {
 			log.Fatalf("failed to close receiver %v", err)
+		}
+		err = cancel()
+		if err != nil {
+			log.Fatalf("failed to close transport: %v", err)
 		}
 	case <-done:
 		log.Printf("reached EOS, closing receiver")
