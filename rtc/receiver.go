@@ -26,10 +26,12 @@ type Receiver struct {
 	rtcpConn RTCPWriter
 	rtpConn  io.Reader
 
-	streamInfo   *interceptor.StreamInfo
-	interceptors interceptor.Registry
-	rtpReader    interceptor.RTCPReader
-	rtcpWriter   interceptor.RTCPWriter
+	streamInfo *interceptor.StreamInfo
+	ir         interceptor.Registry
+	i          interceptor.Interceptor
+
+	rtpReader  interceptor.RTCPReader
+	rtcpWriter interceptor.RTCPWriter
 
 	pipeline *gstsink.Pipeline
 
@@ -64,9 +66,9 @@ func NewReceiver(r io.Reader, w RTCPWriter, opts ...ReceiverOption) (*Receiver, 
 		streamInfo: &interceptor.StreamInfo{
 			SSRC: 0,
 		},
-		interceptors: interceptor.Registry{},
-		packet:       make(chan []byte, 1000),
-		closeC:       make(chan struct{}),
+		ir:     interceptor.Registry{},
+		packet: make(chan []byte, 1000),
+		closeC: make(chan struct{}),
 	}
 	for _, opt := range opts {
 		err := opt(recv)
@@ -86,17 +88,18 @@ func (r *Receiver) ConfigureSCReAMInterceptor() error {
 		Type:      "ack",
 		Parameter: "ccfb",
 	})
-	r.interceptors.Add(cc)
+	r.ir.Add(cc)
 	return nil
 }
 
 func (r *Receiver) ConfigureRTPLogInterceptor(rtcpIn, rtcpOut, rtpIn, rtpOut io.WriteCloser) {
 	i := utils.NewRTPLogInterceptor(rtcpIn, rtcpOut, rtpIn, rtpOut)
-	r.interceptors.Add(i)
+	r.ir.Add(i)
 }
 
 func (r *Receiver) Receive() error {
-	i := r.interceptors.Build()
+	i := r.ir.Build()
+	r.i = i
 
 	pipeline, err := gstsink.NewPipeline(r.codec, r.dst)
 	if err != nil {
@@ -109,12 +112,12 @@ func (r *Receiver) Receive() error {
 		close(eosC)
 	})
 
-	r.rtpReader = i.BindRemoteStream(r.streamInfo, interceptor.RTCPReaderFunc(func(in []byte, attributes interceptor.Attributes) (int, interceptor.Attributes, error) {
+	r.rtpReader = r.i.BindRemoteStream(r.streamInfo, interceptor.RTCPReaderFunc(func(in []byte, attributes interceptor.Attributes) (int, interceptor.Attributes, error) {
 		r.pipeline.Push(in)
 		return len(in), nil, nil
 	}))
 
-	r.rtcpWriter = i.BindRTCPWriter(interceptor.RTCPWriterFunc(func(pkts []rtcp.Packet, attributes interceptor.Attributes) (int, error) {
+	r.rtcpWriter = r.i.BindRTCPWriter(interceptor.RTCPWriterFunc(func(pkts []rtcp.Packet, attributes interceptor.Attributes) (int, error) {
 		return r.rtcpConn.WriteRTCP(pkts)
 	}))
 
@@ -149,6 +152,7 @@ func (r *Receiver) Receive() error {
 		case <-r.closeC:
 			r.pipeline.Stop()
 		}
+		r.i.Close()
 		select {
 		case <-eosC:
 		case <-time.After(3 * time.Second):
