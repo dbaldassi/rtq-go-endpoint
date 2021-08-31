@@ -20,7 +20,11 @@ type rtcpPacket struct {
 func (p *rtcpPacket) String() string {
 	out := "RTCP"
 
-	out += fmt.Sprintf("\t%T", p.Packet)
+	if rp, ok := p.Packet.(*rtcp.RawPacket); ok {
+		out += fmt.Sprintf("\t%v", len([]byte(*rp)))
+	} else {
+		out += fmt.Sprintf("\t%T", p.Packet)
+	}
 
 	return out
 }
