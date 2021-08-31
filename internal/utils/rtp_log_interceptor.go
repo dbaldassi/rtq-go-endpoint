@@ -14,12 +14,13 @@ import (
 
 type rtcpPacket struct {
 	rtcp.Packet
-	receiveTime time.Time
+	receiveTime time.Duration
 }
 
 func (p *rtcpPacket) String() string {
 	out := "RTCP"
 
+	out += fmt.Sprintf("\t%d", p.receiveTime.Milliseconds())
 	if rp, ok := p.Packet.(*rtcp.RawPacket); ok {
 		out += fmt.Sprintf("\t%v", len([]byte(*rp)))
 	} else {
@@ -31,13 +32,13 @@ func (p *rtcpPacket) String() string {
 
 type rtpPacket struct {
 	*rtp.Packet
-	receiveTime time.Time
+	receiveTime time.Duration
 }
 
 func (p *rtpPacket) String() string {
 	out := "RTP"
 
-	out += fmt.Sprintf("\t%d", p.receiveTime.UnixNano())
+	out += fmt.Sprintf("\t%d", p.receiveTime.Milliseconds())
 	out += fmt.Sprintf("\t%d", p.PayloadType)
 	out += fmt.Sprintf("\t%x", p.SSRC)
 	out += fmt.Sprintf("\t%d", p.SequenceNumber)
@@ -50,6 +51,8 @@ func (p *rtpPacket) String() string {
 
 type RTPLogInterceptor struct {
 	interceptor.NoOp
+
+	start time.Time
 
 	rtcpInStream  io.WriteCloser
 	rtcpOutStream io.WriteCloser
@@ -67,6 +70,8 @@ type RTPLogInterceptor struct {
 
 func NewRTPLogInterceptor(rtcpIn, rtcpOut, rtpIn, rtpOut io.WriteCloser) *RTPLogInterceptor {
 	i := &RTPLogInterceptor{
+		start: time.Now(),
+
 		rtcpInStream:  rtcpIn,
 		rtcpOutStream: rtcpOut,
 		rtpInStream:   rtpIn,
@@ -99,7 +104,7 @@ func (r *RTPLogInterceptor) BindRTCPReader(reader interceptor.RTCPReader) interc
 		for _, pkt := range pkts {
 			r.rtcpIn <- &rtcpPacket{
 				Packet:      pkt,
-				receiveTime: time.Now(),
+				receiveTime: time.Since(r.start),
 			}
 		}
 		return i, attr, err
@@ -113,7 +118,7 @@ func (r *RTPLogInterceptor) BindRTCPWriter(writer interceptor.RTCPWriter) interc
 		for _, pkt := range pkts {
 			r.rtcpOut <- &rtcpPacket{
 				Packet:      pkt,
-				receiveTime: time.Now(),
+				receiveTime: time.Since(r.start),
 			}
 		}
 		return writer.Write(pkts, attributes)
@@ -129,7 +134,7 @@ func (r *RTPLogInterceptor) BindLocalStream(info *interceptor.StreamInfo, writer
 				Header:  *header,
 				Payload: payload,
 			},
-			receiveTime: time.Now(),
+			receiveTime: time.Since(r.start),
 		}
 		return writer.Write(header, payload, attributes)
 	})
@@ -139,7 +144,7 @@ func (r *RTPLogInterceptor) BindLocalStream(info *interceptor.StreamInfo, writer
 // will be called once per rtp packet.
 func (r *RTPLogInterceptor) BindRemoteStream(info *interceptor.StreamInfo, reader interceptor.RTPReader) interceptor.RTPReader {
 	return interceptor.RTPReaderFunc(func(bytes []byte, attributes interceptor.Attributes) (int, interceptor.Attributes, error) {
-		ts := time.Now()
+		d := time.Since(r.start)
 		i, attr, err := reader.Read(bytes, attributes)
 		if err != nil {
 			return 0, nil, err
@@ -150,7 +155,7 @@ func (r *RTPLogInterceptor) BindRemoteStream(info *interceptor.StreamInfo, reade
 		}
 		r.rtpIn <- &rtpPacket{
 			Packet:      &pkt,
-			receiveTime: ts,
+			receiveTime: d,
 		}
 		return i, attr, nil
 	})

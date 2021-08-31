@@ -103,21 +103,39 @@ func (s *Sender) ConfigureSCReAMInterceptor(statsLogger io.WriteCloser) error {
 		Parameter: "ccfb",
 	})
 	s.ir.Add(cc)
-	if statsLogger != nil {
-		go func() {
-			defer statsLogger.Close()
-			ticker := time.NewTicker(200 * time.Millisecond)
-			for {
-				select {
-				case <-ticker.C:
+	go func() {
+		defer statsLogger.Close()
+		ticker := time.NewTicker(200 * time.Millisecond)
+		start := time.Now()
+		br := int64(0)
+		for {
+			select {
+			case <-ticker.C:
+				newBr := tx.GetTargetBitrate(0)
+				if statsLogger != nil {
+					t := time.Since(start).Milliseconds()
+					// queueDelay, queueDelayMax, queueDelayMinAvg, sRtt, cwnd,
+					// bytesInFlight, rateTransmitted, isInFastStart,
+					// rtpQueueDelay, targetBitrate, rateRtp, rateTransmitted,
+					// rateAcked, rateLost, rateCe, hiSeqAck
 					stats := tx.GetStatistics(ntpTime(time.Now()))
-					fmt.Fprintf(statsLogger, "%v\n", stats)
-				case <-s.closeC:
-					return
+					// time, bitrate, stats
+					fmt.Fprintf(statsLogger, "%v, %v,\t%v\n", t, br, stats)
 				}
+
+				if newBr < 0 || s.pipeline == nil {
+					// Ignore Key Frame Requests and nil pipelines (may happen at startup)
+					continue
+				}
+				if newBr != br {
+					br = newBr
+					s.pipeline.SetBitRate(uint(newBr))
+				}
+			case <-s.closeC:
+				return
 			}
-		}()
-	}
+		}
+	}()
 	return nil
 }
 
