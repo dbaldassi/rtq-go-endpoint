@@ -70,7 +70,7 @@ func NewSender(w RTPWriter, r io.Reader, opts ...SenderOption) (*Sender, error) 
 		},
 		ir: interceptor.Registry{},
 
-		packet:       make(chan rtp.Packet),
+		packet:       make(chan rtp.Packet, 1_000_000),
 		feedbackErrC: make(chan error),
 		closeC:       make(chan struct{}),
 	}
@@ -92,6 +92,7 @@ func ntpTime(t time.Time) uint64 {
 	fractionalPart := uint32((s - float64(integerPart)) * 0xFFFFFFFF)
 	return uint64(integerPart)<<32 | uint64(fractionalPart)
 }
+
 func (s *Sender) ConfigureSCReAMInterceptor(statsLogger io.WriteCloser) error {
 	tx := screamcgo.NewTx()
 	cc, err := scream.NewSenderInterceptor(scream.Tx(tx))
