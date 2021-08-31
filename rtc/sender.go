@@ -9,6 +9,7 @@ import (
 
 	gstsrc "github.com/mengelbart/rtq-go-endpoint/internal/gstreamer-src"
 	"github.com/mengelbart/rtq-go-endpoint/internal/utils"
+	screamcgo "github.com/mengelbart/scream-go"
 	"github.com/pion/interceptor"
 	"github.com/pion/interceptor/pkg/scream"
 	"github.com/pion/rtp"
@@ -82,8 +83,18 @@ func NewSender(w RTPWriter, r io.Reader, opts ...SenderOption) (*Sender, error) 
 	return s, nil
 }
 
-func (s *Sender) ConfigureSCReAMInterceptor() error {
-	cc, err := scream.NewSenderInterceptor()
+func ntpTime(t time.Time) uint64 {
+	// seconds since 1st January 1900
+	s := (float64(t.UnixNano()) / 1000000000) + 2208988800
+
+	// higher 32 bits are the integer part, lower 32 bits are the fractional part
+	integerPart := uint32(s)
+	fractionalPart := uint32((s - float64(integerPart)) * 0xFFFFFFFF)
+	return uint64(integerPart)<<32 | uint64(fractionalPart)
+}
+func (s *Sender) ConfigureSCReAMInterceptor(statsLogger io.WriteCloser) error {
+	tx := screamcgo.NewTx()
+	cc, err := scream.NewSenderInterceptor(scream.Tx(tx))
 	if err != nil {
 		return err
 	}
@@ -92,6 +103,21 @@ func (s *Sender) ConfigureSCReAMInterceptor() error {
 		Parameter: "ccfb",
 	})
 	s.ir.Add(cc)
+	if statsLogger != nil {
+		go func() {
+			defer statsLogger.Close()
+			ticker := time.NewTicker(200 * time.Millisecond)
+			for {
+				select {
+				case <-ticker.C:
+					stats := tx.GetStatistics(ntpTime(time.Now()))
+					fmt.Fprintf(statsLogger, "%v\n", stats)
+				case <-s.closeC:
+					return
+				}
+			}
+		}()
+	}
 	return nil
 }
 

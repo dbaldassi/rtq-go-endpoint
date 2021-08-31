@@ -31,16 +31,12 @@ const (
 )
 
 func main() {
-	logFilename := os.Getenv("LOG_FILE")
-	if logFilename != "" {
-		logfile, err := os.Create(logFilename)
-		if err != nil {
-			fmt.Printf("Could not create log file: %s\n", err.Error())
-			os.Exit(1)
-		}
-		defer logfile.Close()
-		log.SetOutput(logfile)
+	logWriter, err := utils.GetMainLogWriter()
+	if err != nil {
+		log.Fatal(err)
 	}
+	defer logWriter.Close()
+	log.SetOutput(logWriter)
 	defer log.Println("END MAIN")
 
 	sendCmd := flag.NewFlagSet("send", flag.ExitOnError)
@@ -151,8 +147,12 @@ func send(src, proto, remote, codec, rtcc string) {
 
 	switch rtcc {
 	case SCREAM:
-		sender.ConfigureSCReAMInterceptor()
-		err := sender.AcceptFeedback()
+		cclog, err := utils.GetCCStatLogWriter()
+		if err != nil {
+			log.Fatal(err)
+		}
+		sender.ConfigureSCReAMInterceptor(cclog)
+		err = sender.AcceptFeedback()
 		if err != nil {
 			log.Fatal(err)
 		}

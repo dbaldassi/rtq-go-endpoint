@@ -25,7 +25,7 @@ type bufferedWriteCloser struct {
 }
 
 // NewBufferedWriteCloser creates an io.WriteCloser from a bufio.Writer and an io.Closer
-func newBufferedWriteCloser(writer *bufio.Writer, closer io.Closer) io.WriteCloser {
+func newBufferedWriteCloser(writer *bufio.Writer, closer io.Closer) *bufferedWriteCloser {
 	return &bufferedWriteCloser{
 		Writer: writer,
 		Closer: closer,
@@ -37,6 +37,30 @@ func (h bufferedWriteCloser) Close() error {
 		return err
 	}
 	return h.Closer.Close()
+}
+
+func getFileLogWriter(path string) (*bufferedWriteCloser, error) {
+	logfile, err := os.Create(path)
+	if err != nil {
+		return nil, err
+	}
+	return newBufferedWriteCloser(bufio.NewWriter(logfile), logfile), nil
+}
+
+func GetMainLogWriter() (io.WriteCloser, error) {
+	logFilename := os.Getenv("LOG_FILE")
+	if len(logFilename) == 0 {
+		return NopCloser{Writer: os.Stdout}, nil
+	}
+	return getFileLogWriter(logFilename)
+}
+
+func GetCCStatLogWriter() (io.WriteCloser, error) {
+	logFilename := os.Getenv("CCLOGFILE")
+	if len(logFilename) == 0 {
+		return NopCloser{Writer: os.Stdout}, nil
+	}
+	return getFileLogWriter(logFilename)
 }
 
 // GetQLOGWriter creates the QLOGDIR and returns the GetLogWriter callback
@@ -57,13 +81,13 @@ func GetQLOGWriter() (func(perspective logging.Perspective, connID []byte) io.Wr
 	}
 	return func(_ logging.Perspective, connID []byte) io.WriteCloser {
 		path := fmt.Sprintf("%s/%x.qlog", strings.TrimRight(qlogDir, "/"), connID)
-		f, err := os.Create(path)
+		w, err := getFileLogWriter(path)
 		if err != nil {
 			log.Printf("failed to create qlog file %s: %v", path, err)
 			return nil
 		}
 		log.Printf("created qlog file: %s\n", path)
-		return newBufferedWriteCloser(bufio.NewWriter(f), f)
+		return w
 	}, nil
 }
 
@@ -86,12 +110,12 @@ func GetRTPLogWriter() (func(string) io.WriteCloser, error) {
 	}
 	return func(stream string) io.WriteCloser {
 		path := fmt.Sprintf("%s/%s.log", strings.TrimRight(rtpLogDir, "/"), stream)
-		f, err := os.Create(path)
+		w, err := getFileLogWriter(path)
 		if err != nil {
 			log.Printf("failed to create rtp/rtcp log file %s: %v", path, err)
 			return nil
 		}
 		log.Printf("created rtp/rtcp log file: %s", path)
-		return newBufferedWriteCloser(bufio.NewWriter(f), f)
+		return w
 	}, nil
 }
