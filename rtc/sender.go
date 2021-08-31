@@ -50,6 +50,13 @@ func SenderCodec(codec string) SenderOption {
 	}
 }
 
+func SenderSrc(src string) SenderOption {
+	return func(s *Sender) error {
+		s.src = src
+		return nil
+	}
+}
+
 func NewSender(w RTPWriter, r io.Reader, opts ...SenderOption) (*Sender, error) {
 	s := &Sender{
 		codec:    "h264",

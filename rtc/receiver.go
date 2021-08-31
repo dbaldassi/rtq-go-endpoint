@@ -47,6 +47,13 @@ func ReceiverCodec(codec string) ReceiverOption {
 	}
 }
 
+func ReceiverDst(dst string) ReceiverOption {
+	return func(r *Receiver) error {
+		r.dst = dst
+		return nil
+	}
+}
+
 func NewReceiver(r io.Reader, w RTCPWriter, opts ...ReceiverOption) (*Receiver, error) {
 	recv := &Receiver{
 		codec:    "h264",

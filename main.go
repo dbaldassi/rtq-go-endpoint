@@ -4,10 +4,12 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"log"
 	"os"
 	"os/signal"
 
+	"github.com/mengelbart/rtq-go-endpoint/internal/utils"
 	"github.com/mengelbart/rtq-go-endpoint/rtc"
 	"github.com/mengelbart/rtq-go-endpoint/transport"
 )
@@ -29,6 +31,16 @@ const (
 )
 
 func main() {
+	logFilename := os.Getenv("LOG_FILE")
+	if logFilename != "" {
+		logfile, err := os.Create(logFilename)
+		if err != nil {
+			fmt.Printf("Could not create log file: %s\n", err.Error())
+			os.Exit(1)
+		}
+		defer logfile.Close()
+		log.SetOutput(logfile)
+	}
 	defer log.Println("END MAIN")
 
 	sendCmd := flag.NewFlagSet("send", flag.ExitOnError)
@@ -41,11 +53,13 @@ func main() {
 		rtcc  string
 	)
 	for _, fs := range []*flag.FlagSet{sendCmd, receiveCmd} {
-		fs.StringVar(&addr, "addr", "127.0.0.1:4242", "addr host the receiver or to connect the sender to")
+		fs.StringVar(&addr, "addr", ":4242", "addr host the receiver or to connect the sender to")
 		fs.StringVar(&codec, "codec", H264, "Video Codec")
 		fs.StringVar(&proto, "transport", QUIC, fmt.Sprintf("Transport to use, options: '%v', '%v'", QUIC, UDP))
 		fs.StringVar(&rtcc, "cc", NOCC, fmt.Sprintf("Real-time Congestion Controller to use, options: '%v', '%v'", NOCC, SCREAM))
 	}
+
+	log.Println(os.Args)
 
 	if len(os.Args) < 2 {
 		fmt.Println("expected 'send' or 'receive' subcommands")
@@ -54,10 +68,22 @@ func main() {
 	switch os.Args[1] {
 	case "send":
 		sendCmd.Parse(os.Args[2:])
-		send(proto, addr, codec, rtcc)
+		files := sendCmd.Args()
+		log.Printf("src files: %v\n", files)
+		src := "videotestsrc"
+		if len(files) > 0 {
+			src = fmt.Sprintf("filesrc location=%v ! queue ! decodebin ! videoconvert ", files[0])
+		}
+		send(src, proto, addr, codec, rtcc)
 	case "receive":
 		receiveCmd.Parse(os.Args[2:])
-		receive(proto, addr, codec, rtcc)
+		files := receiveCmd.Args()
+		log.Printf("dst file: %v\n", files)
+		dst := "autovideosink"
+		if len(files) > 0 {
+			dst = fmt.Sprintf("matroskamux ! filesink location=%v", files[0])
+		}
+		receive(dst, proto, addr, codec, rtcc)
 	default:
 		fmt.Printf("unknown command: %v\n", os.Args[1])
 		fmt.Println("expected 'send' or 'receive' subcommands")
@@ -65,7 +91,7 @@ func main() {
 	}
 }
 
-func send(proto, remote, codec, rtcc string) {
+func send(src, proto, remote, codec, rtcc string) {
 	var w rtc.RTPWriter
 	var r io.Reader
 	var cancel func() error
@@ -111,12 +137,17 @@ func send(proto, remote, codec, rtcc string) {
 		w,
 		r,
 		rtc.SenderCodec(codec),
+		rtc.SenderSrc(src),
 	)
 	if err != nil {
 		log.Fatalf("failed to create RTP sender: %v", err)
 	}
 
-	sender.ConfigureRTPLogInterceptor(os.Stdout, os.Stdout, os.Stdout, os.Stdout)
+	rtpLogger, err := utils.GetRTPLogWriter()
+	if err != nil {
+		log.Fatal(err)
+	}
+	sender.ConfigureRTPLogInterceptor(rtpLogger("rtcp_in"), utils.NopCloser{Writer: ioutil.Discard}, utils.NopCloser{Writer: ioutil.Discard}, rtpLogger("rtp_out"))
 
 	switch rtcc {
 	case SCREAM:
@@ -155,7 +186,7 @@ func send(proto, remote, codec, rtcc string) {
 	}
 }
 
-func receive(proto, remote, codec, rtcc string) {
+func receive(dst, proto, remote, codec, rtcc string) {
 	var w rtc.RTCPWriter
 	var r io.Reader
 	var cancel func() error
@@ -197,12 +228,16 @@ func receive(proto, remote, codec, rtcc string) {
 		log.Fatalf("unknown transport protocol: %v", proto)
 	}
 
-	recv, err := rtc.NewReceiver(r, w)
+	recv, err := rtc.NewReceiver(r, w, rtc.ReceiverDst(dst))
 	if err != nil {
 		log.Fatalf("failed to create RTP receiver: %v", err)
 	}
 
-	recv.ConfigureRTPLogInterceptor(os.Stdout, os.Stdout, os.Stdout, os.Stdout)
+	rtpLogger, err := utils.GetRTPLogWriter()
+	if err != nil {
+		log.Fatal(err)
+	}
+	recv.ConfigureRTPLogInterceptor(utils.NopCloser{Writer: ioutil.Discard}, rtpLogger("rtcp_out"), rtpLogger("rtp_in"), utils.NopCloser{Writer: ioutil.Discard})
 
 	switch rtcc {
 	case SCREAM:
