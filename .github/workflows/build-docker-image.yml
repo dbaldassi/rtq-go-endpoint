@@ -5,9 +5,6 @@ on:
       - 'main'
     tags:
       - 'v*'
-  pull_request:
-    branches:
-      - 'main'
 
 jobs:
   endpoint:
@@ -15,7 +12,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [newreno, nocc, scream, scream-newreno, udp-nocc, udp-scream]
+        variant: [newreno, nocc, scream, scream-infer, scream-infer-newreno, scream-newreno, udp-nocc, udp-scream]
     steps:
       - name: Checkout code
         uses: actions/checkout@v2

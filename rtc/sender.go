@@ -19,12 +19,17 @@ type RTPWriter interface {
 	WriteRTP(header *rtp.Header, payload []byte) (int, error)
 }
 
+type AckingRTPWriter interface {
+	WriteRTPNotify(header *rtp.Header, payload []byte, notify func(bool)) (int, error)
+}
+
 type Sender struct {
 	codec string
 	src   string
 	mtu   int
 
-	rtpConn  RTPWriter
+	writeRTP interceptor.RTPWriterFunc
+
 	rtcpConn io.Reader
 
 	streamInfo *interceptor.StreamInfo
@@ -63,7 +68,7 @@ func NewSender(w RTPWriter, r io.Reader, opts ...SenderOption) (*Sender, error) 
 		codec:    "h264",
 		src:      "videotestsrc",
 		mtu:      1400,
-		rtpConn:  w,
+		writeRTP: defaultRTPWriterFunc(w),
 		rtcpConn: r,
 		streamInfo: &interceptor.StreamInfo{
 			SSRC: 0,
@@ -93,6 +98,45 @@ func ntpTime(t time.Time) uint64 {
 	return uint64(integerPart)<<32 | uint64(fractionalPart)
 }
 
+func (s *Sender) ConfigureInferingSCReAMInterceptor(statsLogger io.WriteCloser, w AckingRTPWriter) error {
+	fbc := make(chan []byte, 1_000_000)
+	go s.inferFeedback(fbc)
+
+	fbi := newFBInferer(w, screamcgo.NewRx(0), fbc)
+	s.writeRTP = fbi.rtpWriterFunc
+	go fbi.buffer(s.closeC)
+
+	tx := screamcgo.NewTx()
+	cc, err := scream.NewSenderInterceptor(scream.Tx(tx))
+	if err != nil {
+		return err
+	}
+	s.streamInfo.RTCPFeedback = append(s.streamInfo.RTCPFeedback, interceptor.RTCPFeedback{
+		Type:      "ack",
+		Parameter: "ccfb",
+	})
+	s.ir.Add(cc)
+	go s.runSCReAMStats(statsLogger, tx)
+	return nil
+}
+
+func (s *Sender) inferFeedback(fbc <-chan []byte) error {
+	go func() {
+		defer log.Println("finish infering feedback")
+		for {
+			select {
+			case buffer := <-fbc:
+				if _, _, err := s.rtcpReader.Read(buffer, interceptor.Attributes{}); err != nil {
+					s.feedbackErrC <- err
+				}
+			case <-s.closeC:
+				return
+			}
+		}
+	}()
+	return nil
+}
+
 func (s *Sender) ConfigureSCReAMInterceptor(statsLogger io.WriteCloser) error {
 	tx := screamcgo.NewTx()
 	cc, err := scream.NewSenderInterceptor(scream.Tx(tx))
@@ -104,55 +148,8 @@ func (s *Sender) ConfigureSCReAMInterceptor(statsLogger io.WriteCloser) error {
 		Parameter: "ccfb",
 	})
 	s.ir.Add(cc)
-	go func() {
-		defer statsLogger.Close()
-		ticker := time.NewTicker(200 * time.Millisecond)
-		start := time.Now()
-		br := int64(0)
-		for {
-			select {
-			case <-ticker.C:
-				newBr := tx.GetTargetBitrate(0)
-				if statsLogger != nil {
-					t := time.Since(start).Milliseconds()
-					// queueDelay, queueDelayMax, queueDelayMinAvg, sRtt, cwnd,
-					// bytesInFlight, rateTransmitted, isInFastStart,
-					// rtpQueueDelay, targetBitrate, rateRtp, rateTransmitted,
-					// rateAcked, rateLost, rateCe, hiSeqAck
-					stats := tx.GetStatistics(ntpTime(time.Now()))
-					// time, bitrate, stats
-					fmt.Fprintf(statsLogger, "%v, %v,\t%v\n", t, br, stats)
-				}
-
-				if newBr < 0 || s.pipeline == nil {
-					// Ignore Key Frame Requests and nil pipelines (may happen at startup)
-					continue
-				}
-				if newBr != br {
-					br = newBr
-					s.pipeline.SetBitRate(uint(newBr))
-				}
-			case <-s.closeC:
-				return
-			}
-		}
-	}()
+	go s.runSCReAMStats(statsLogger, tx)
 	return nil
-}
-
-func (s *Sender) ConfigureRTPLogInterceptor(rtcpIn, rtcpOut, rtpIn, rtpOut io.WriteCloser) {
-	i := utils.NewRTPLogInterceptor(rtcpIn, rtcpOut, rtpIn, rtpOut)
-	s.ir.Add(i)
-}
-
-func (s *Sender) Write(p []byte) (n int, err error) {
-	var pkt rtp.Packet
-	err = pkt.Unmarshal(p)
-	if err != nil {
-		return 0, err
-	}
-	s.packet <- pkt
-	return len(p), nil
 }
 
 func (s *Sender) AcceptFeedback() error {
@@ -174,12 +171,58 @@ func (s *Sender) AcceptFeedback() error {
 	return nil
 }
 
-func (s *Sender) Start() error {
-	i := s.ir.Build()
-	s.i = i
+func (s *Sender) runSCReAMStats(statsLogger io.WriteCloser, tx *screamcgo.Tx) {
+	defer statsLogger.Close()
+	ticker := time.NewTicker(200 * time.Millisecond)
+	start := time.Now()
+	br := int64(0)
+	for {
+		select {
+		case <-ticker.C:
+			newBr := tx.GetTargetBitrate(0)
+			if statsLogger != nil {
+				t := time.Since(start).Milliseconds()
+				// queueDelay, queueDelayMax, queueDelayMinAvg, sRtt, cwnd,
+				// bytesInFlight, rateTransmitted, isInFastStart,
+				// rtpQueueDelay, targetBitrate, rateRtp, rateTransmitted,
+				// rateAcked, rateLost, rateCe, hiSeqAck
+				stats := tx.GetStatistics(ntpTime(time.Now()))
+				// time, bitrate, stats
+				fmt.Fprintf(statsLogger, "%v, %v,\t%v\n", t, br, stats)
+			}
 
-	s.rtpWriter = s.i.BindLocalStream(s.streamInfo, interceptor.RTPWriterFunc(func(header *rtp.Header, payload []byte, attributes interceptor.Attributes) (int, error) {
-		n, err := s.rtpConn.WriteRTP(header, payload)
+			if newBr < 0 || s.pipeline == nil {
+				// Ignore Key Frame Requests and nil pipelines (may happen at startup)
+				continue
+			}
+			if newBr != br {
+				br = newBr
+				s.pipeline.SetBitRate(uint(newBr))
+			}
+		case <-s.closeC:
+			return
+		}
+	}
+}
+
+func (s *Sender) ConfigureRTPLogInterceptor(rtcpIn, rtcpOut, rtpIn, rtpOut io.WriteCloser) {
+	i := utils.NewRTPLogInterceptor(rtcpIn, rtcpOut, rtpIn, rtpOut)
+	s.ir.Add(i)
+}
+
+func (s *Sender) Write(p []byte) (n int, err error) {
+	var pkt rtp.Packet
+	err = pkt.Unmarshal(p)
+	if err != nil {
+		return 0, err
+	}
+	s.packet <- pkt
+	return len(p), nil
+}
+
+func defaultRTPWriterFunc(w RTPWriter) interceptor.RTPWriterFunc {
+	return func(header *rtp.Header, payload []byte, attributes interceptor.Attributes) (int, error) {
+		n, err := w.WriteRTP(header, payload)
 
 		if err != nil {
 			if netErr, ok := err.(net.Error); ok && !netErr.Temporary() || err.Error() == "Application error 0x0: eos" {
@@ -189,7 +232,14 @@ func (s *Sender) Start() error {
 		}
 
 		return n, err
-	}))
+	}
+}
+
+func (s *Sender) Start() error {
+	i := s.ir.Build()
+	s.i = i
+
+	s.rtpWriter = s.i.BindLocalStream(s.streamInfo, interceptor.RTPWriterFunc(s.writeRTP))
 
 	s.rtcpReader = s.i.BindRTCPReader(interceptor.RTCPReaderFunc(func(in []byte, attributes interceptor.Attributes) (int, interceptor.Attributes, error) {
 		return len(in), nil, nil
