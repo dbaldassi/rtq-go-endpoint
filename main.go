@@ -26,8 +26,9 @@ const (
 	QUIC = "quic"
 	UDP  = "udp"
 
-	NOCC   = "nocc"
-	SCREAM = "scream"
+	NOCC         = "nocc"
+	SCREAM       = "scream"
+	SCREAM_INFER = "scream-infer"
 )
 
 func main() {
@@ -52,7 +53,7 @@ func main() {
 		fs.StringVar(&addr, "addr", ":4242", "addr host the receiver or to connect the sender to")
 		fs.StringVar(&codec, "codec", H264, "Video Codec")
 		fs.StringVar(&proto, "transport", QUIC, fmt.Sprintf("Transport to use, options: '%v', '%v'", QUIC, UDP))
-		fs.StringVar(&rtcc, "cc", NOCC, fmt.Sprintf("Real-time Congestion Controller to use, options: '%v', '%v'", NOCC, SCREAM))
+		fs.StringVar(&rtcc, "cc", NOCC, fmt.Sprintf("Real-time Congestion Controller to use, options: '%v', '%v', '%v'", NOCC, SCREAM, SCREAM_INFER))
 	}
 
 	log.Println(os.Args)
@@ -151,8 +152,20 @@ func send(src, proto, remote, codec, rtcc string) {
 		if err != nil {
 			log.Fatal(err)
 		}
-		sender.ConfigureSCReAMInterceptor(cclog)
+		err = sender.ConfigureSCReAMInterceptor(cclog)
+		if err != nil {
+			log.Fatal(err)
+		}
 		err = sender.AcceptFeedback()
+		if err != nil {
+			log.Fatal(err)
+		}
+	case SCREAM_INFER:
+		cclog, err := utils.GetCCStatLogWriter()
+		if err != nil {
+			log.Fatal(err)
+		}
+		err = sender.ConfigureInferingSCReAMInterceptor(cclog, w.(rtc.AckingRTPWriter))
 		if err != nil {
 			log.Fatal(err)
 		}
