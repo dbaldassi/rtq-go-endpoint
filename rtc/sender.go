@@ -8,10 +8,10 @@ import (
 	"time"
 
 	gstsrc "github.com/mengelbart/rtq-go-endpoint/internal/gstreamer-src"
+	"github.com/mengelbart/rtq-go-endpoint/internal/scream"
 	"github.com/mengelbart/rtq-go-endpoint/internal/utils"
 	screamcgo "github.com/mengelbart/scream-go"
 	"github.com/pion/interceptor"
-	"github.com/pion/interceptor/pkg/scream"
 	"github.com/pion/rtp"
 )
 
@@ -88,16 +88,6 @@ func NewSender(w RTPWriter, r io.Reader, opts ...SenderOption) (*Sender, error) 
 	return s, nil
 }
 
-func ntpTime(t time.Time) uint64 {
-	// seconds since 1st January 1900
-	s := (float64(t.UnixNano()) / 1000000000) + 2208988800
-
-	// higher 32 bits are the integer part, lower 32 bits are the fractional part
-	integerPart := uint32(s)
-	fractionalPart := uint32((s - float64(integerPart)) * 0xFFFFFFFF)
-	return uint64(integerPart)<<32 | uint64(fractionalPart)
-}
-
 func (s *Sender) ConfigureInferingSCReAMInterceptor(statsLogger io.WriteCloser, w AckingRTPWriter) error {
 	fbc := make(chan []byte, 1_000_000)
 	go s.inferFeedback(fbc)
@@ -116,7 +106,7 @@ func (s *Sender) ConfigureInferingSCReAMInterceptor(statsLogger io.WriteCloser, 
 		Parameter: "ccfb",
 	})
 	s.ir.Add(cc)
-	go s.runSCReAMStats(statsLogger, tx)
+	go s.runSCReAMStats(statsLogger, cc)
 	return nil
 }
 
@@ -148,7 +138,7 @@ func (s *Sender) ConfigureSCReAMInterceptor(statsLogger io.WriteCloser) error {
 		Parameter: "ccfb",
 	})
 	s.ir.Add(cc)
-	go s.runSCReAMStats(statsLogger, tx)
+	go s.runSCReAMStats(statsLogger, cc)
 	return nil
 }
 
@@ -171,33 +161,31 @@ func (s *Sender) AcceptFeedback() error {
 	return nil
 }
 
-func (s *Sender) runSCReAMStats(statsLogger io.WriteCloser, tx *screamcgo.Tx) {
+func (s *Sender) runSCReAMStats(statsLogger io.WriteCloser, cc *scream.SenderInterceptor) {
 	defer statsLogger.Close()
-	ticker := time.NewTicker(200 * time.Millisecond)
+	ticker := time.NewTicker(20 * time.Millisecond)
 	start := time.Now()
-	br := int64(0)
+	var lastBitrate uint
 	for {
 		select {
 		case <-ticker.C:
-			newBr := tx.GetTargetBitrate(0)
+			kbps, err := cc.GetTargetBitrate(0)
+			if err != nil {
+				log.Printf("failed to get target bitrate: %v\n", err)
+			}
+			t := time.Since(start).Milliseconds()
+			if kbps > 0 && s.pipeline != nil && lastBitrate != uint(kbps) {
+				lastBitrate = uint(kbps)
+				s.pipeline.SetBitRate(lastBitrate)
+			}
 			if statsLogger != nil {
-				t := time.Since(start).Milliseconds()
 				// queueDelay, queueDelayMax, queueDelayMinAvg, sRtt, cwnd,
 				// bytesInFlight, rateTransmitted, isInFastStart,
 				// rtpQueueDelay, targetBitrate, rateRtp, rateTransmitted,
 				// rateAcked, rateLost, rateCe, hiSeqAck
-				stats := tx.GetStatistics(ntpTime(time.Now()))
+				stats := cc.GetStatistics()
 				// time, bitrate, stats
-				fmt.Fprintf(statsLogger, "%v, %v,\t%v\n", t, br, stats)
-			}
-
-			if newBr < 0 || s.pipeline == nil {
-				// Ignore Key Frame Requests and nil pipelines (may happen at startup)
-				continue
-			}
-			if newBr != br {
-				br = newBr
-				s.pipeline.SetBitRate(uint(newBr))
+				fmt.Fprintf(statsLogger, "%v, %v,\t%v\n", t, lastBitrate, stats)
 			}
 		case <-s.closeC:
 			return

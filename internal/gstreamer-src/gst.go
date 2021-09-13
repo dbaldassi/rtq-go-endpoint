@@ -52,7 +52,7 @@ func NewPipeline(codecName, src string, w io.Writer) (*Pipeline, error) {
 
 	case "h264":
 		payloader = "rtph264pay"
-		pipelineStr = src + " ! x264enc name=x264enc speed-preset=ultrafast tune=zerolatency key-int-max=20 ! video/x-h264 ! rtph264pay name=rtph264pay mtu=1200 ! " + pipelineStr
+		pipelineStr = src + " ! x264enc name=x264enc bitrate=1 speed-preset=ultrafast tune=zerolatency key-int-max=20 ! video/x-h264 ! rtph264pay name=rtph264pay mtu=1200 ! " + pipelineStr
 
 	default:
 		return nil, UnknownCodecError

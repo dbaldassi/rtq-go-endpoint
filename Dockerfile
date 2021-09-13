@@ -1,4 +1,4 @@
-FROM golang:1.16.5-buster AS build
+FROM golang:1.17.1-buster AS build
 
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -yqq \
         wget \

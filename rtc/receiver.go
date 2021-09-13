@@ -8,9 +8,9 @@ import (
 	"time"
 
 	gstsink "github.com/mengelbart/rtq-go-endpoint/internal/gstreamer-sink"
+	"github.com/mengelbart/rtq-go-endpoint/internal/scream"
 	"github.com/mengelbart/rtq-go-endpoint/internal/utils"
 	"github.com/pion/interceptor"
-	"github.com/pion/interceptor/pkg/scream"
 	"github.com/pion/rtcp"
 )
 

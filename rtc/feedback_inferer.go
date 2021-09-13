@@ -11,12 +11,29 @@ import (
 	"github.com/pion/rtp"
 )
 
+func getNTPT0() float64 {
+	now := time.Now()
+	secs := now.Unix()
+	usecs := now.UnixMicro() - secs*1e6
+	return (float64(secs) + float64(usecs)*1e-6) - 1e-3
+}
+
+func getTimeBetweenNTP(t0 float64, tx time.Time) uint64 {
+	secs := tx.Unix()
+	usecs := tx.UnixMicro() - secs*1e6
+	tt := (float64(secs) + float64(usecs)*1e-6) - t0
+	ntp64 := uint64(tt * 65536.0)
+	ntp := 0xFFFFFFFF & ntp64
+	return ntp
+}
+
 type fbInferer struct {
 	rtpConn  AckingRTPWriter
 	rx       *screamcgo.Rx
 	received chan []byte
 	acked    chan ackedPkt
 	rtt      time.Duration
+	t0       float64
 }
 
 func newFBInferer(w AckingRTPWriter, rx *screamcgo.Rx, received chan []byte) *fbInferer {
@@ -25,6 +42,7 @@ func newFBInferer(w AckingRTPWriter, rx *screamcgo.Rx, received chan []byte) *fb
 		rx:       rx,
 		received: received,
 		acked:    make(chan ackedPkt, 1000),
+		t0:       getNTPT0(),
 	}
 }
 
@@ -33,6 +51,10 @@ type ackedPkt struct {
 	ssrc      uint32
 	size      int
 	seqNr     uint16
+}
+
+func (f *fbInferer) ntpTime(t time.Time) uint64 {
+	return getTimeBetweenNTP(f.t0, t)
 }
 
 func (f *fbInferer) buffer(cancel chan struct{}) {
@@ -52,12 +74,12 @@ func (f *fbInferer) buffer(cancel chan struct{}) {
 			})
 
 			for _, pkt := range buf {
-				f.rx.Receive(ntpTime(pkt.receiveTS), pkt.ssrc, pkt.size, pkt.seqNr, 0)
+				f.rx.Receive(f.ntpTime(pkt.receiveTS), pkt.ssrc, pkt.size, pkt.seqNr, 0)
 			}
 			lastTS := buf[len(buf)-1].receiveTS
 			buf = []ackedPkt{}
 
-			if ok, fb := f.rx.CreateStandardizedFeedback(ntpTime(lastTS), true); ok {
+			if ok, fb := f.rx.CreateStandardizedFeedback(f.ntpTime(lastTS), true); ok {
 				f.received <- fb
 			}
 
