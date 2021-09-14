@@ -20,5 +20,6 @@ void gstreamer_send_destroy_pipeline(GstElement* pipeline);
 unsigned int gstreamer_send_get_ssrc(GstElement* pipeline, char *payloader);
 void gstreamer_send_set_ssrc(GstElement* pipeline, char *payloader, unsigned int ssrc);
 void gstreamer_send_set_bitrate(GstElement* pipeline, unsigned int bitrate);
+unsigned int gstreamer_send_get_bitrate(GstElement* pipeline);
 
 #endif

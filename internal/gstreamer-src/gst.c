@@ -105,3 +105,10 @@ void gstreamer_send_set_bitrate(GstElement* pipeline, unsigned int bitrate) {
     GstElement* x264enc = gst_bin_get_by_name(GST_BIN(pipeline), "x264enc");
     g_object_set(x264enc, "bitrate", bitrate, NULL);
 }
+
+unsigned int gstreamer_send_get_bitrate(GstElement* pipeline) {
+    GstElement* x264enc = gst_bin_get_by_name(GST_BIN(pipeline), "x264enc");
+    unsigned int bitrate = 0;
+    g_object_get(x264enc, "bitrate", &bitrate, NULL);
+    return bitrate;
+}

@@ -118,6 +118,10 @@ func (p *Pipeline) SetBitRate(bitrate uint) {
 	C.gstreamer_send_set_bitrate(p.pipeline, C.uint(bitrate))
 }
 
+func (p *Pipeline) GetBitrate() uint {
+	return uint(C.gstreamer_send_get_bitrate(p.pipeline))
+}
+
 //export goHandlePipelineBuffer
 func goHandlePipelineBuffer(buffer unsafe.Pointer, bufferLen C.int, pipelineID C.int) {
 	pipelinesLock.Lock()
