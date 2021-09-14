@@ -24,6 +24,7 @@ type ReceiverInterceptor struct {
 	screamRx   map[uint32]*scream.Rx
 	screamRxMu sync.Mutex
 	interval   time.Duration
+	receive    chan *rtp.Packet
 
 	t0 float64
 }
@@ -35,6 +36,7 @@ func NewReceiverInterceptor(opts ...ReceiverOption) (*ReceiverInterceptor, error
 		close:    make(chan struct{}),
 		log:      logging.NewDefaultLoggerFactory().NewLogger("scream_receiver"),
 		screamRx: map[uint32]*scream.Rx{},
+		receive:  make(chan *rtp.Packet),
 		t0:       getNTPT0(),
 	}
 	for _, opt := range opts {
@@ -89,8 +91,8 @@ func (r *ReceiverInterceptor) BindRemoteStream(info *interceptor.StreamInfo, rea
 			return 0, nil, err
 		}
 
-		// TODO: Add support for ECN via ceBits?
-		rx.Receive(r.getTimeNTP(time.Now()), pkt.SSRC, pkt.MarshalSize(), pkt.SequenceNumber, 0)
+		r.receive <- &pkt
+
 		return i, attr, nil
 	})
 }
@@ -121,13 +123,25 @@ func (r *ReceiverInterceptor) loop(rtcpWriter interceptor.RTCPWriter) {
 	defer ticker.Stop()
 	for {
 		select {
+		case pkt := <-r.receive:
+			t := r.getTimeNTP(time.Now())
+
+			r.screamRxMu.Lock()
+			if rx, ok := r.screamRx[pkt.SSRC]; ok {
+				//fmt.Printf("receive pkt %v at t=%v\n", pkt.SequenceNumber, t)
+				rx.Receive(t, pkt.SSRC, pkt.MarshalSize(), pkt.SequenceNumber, 0)
+			}
+			r.screamRxMu.Unlock()
+
 		case <-ticker.C:
 			func() {
 				r.screamRxMu.Lock()
 
 				for _, rx := range r.screamRx {
 					// TODO: Check meaning of isMark
-					if ok, feedback := rx.CreateStandardizedFeedback(r.getTimeNTP(time.Now()), true); ok {
+					t := r.getTimeNTP(time.Now())
+					if ok, feedback := rx.CreateStandardizedFeedback(t, true); ok {
+						//fmt.Printf("sent feedback at %v\n", t)
 						fb := rtcp.RawPacket(feedback)
 						if _, err := rtcpWriter.Write([]rtcp.Packet{&fb}, interceptor.Attributes{}); err != nil {
 							r.log.Warnf("failed sending scream feedback report: %+v", err)
