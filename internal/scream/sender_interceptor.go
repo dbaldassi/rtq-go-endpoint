@@ -163,9 +163,9 @@ func (s *SenderInterceptor) BindLocalStream(info *interceptor.StreamInfo, writer
 
 	// TODO: Somehow set these attributes per stream
 	priority := float64(1)            // highest priority
-	minBitrate := float64(1_000)      // 1Kbps
-	startBitrate := float64(1_000)    // 1Kbps
-	maxBitrate := float64(50_000_000) // 50Mbps
+	minBitrate := float64(1_000)      // 1 Kbps (gstreamers x264enc minimum)
+	startBitrate := float64(100_000)  // 100 Kbps
+	maxBitrate := float64(2048000000) // 2048 Mbps (gstreamers x264enc maximum)
 
 	s.tx.RegisterNewStream(rtpQueue, info.SSRC, priority, minBitrate, startBitrate, maxBitrate)
 

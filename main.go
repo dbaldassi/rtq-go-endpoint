@@ -241,7 +241,7 @@ func receive(dst, proto, remote, codec, rtcc string) {
 		log.Fatalf("unknown transport protocol: %v", proto)
 	}
 
-	recv, err := rtc.NewReceiver(r, w, rtc.ReceiverDst(dst))
+	recv, err := rtc.NewReceiver(r, w, rtc.ReceiverDst(dst), rtc.ReceiverCodec(codec))
 	if err != nil {
 		log.Fatalf("failed to create RTP receiver: %v", err)
 	}

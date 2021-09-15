@@ -9,6 +9,7 @@ package gst
 import "C"
 import (
 	"errors"
+	"fmt"
 	"unsafe"
 )
 
@@ -28,21 +29,22 @@ type Pipeline struct {
 }
 
 func NewPipeline(codecName, dst string) (*Pipeline, error) {
-	pipelineStr := "appsrc format=time is-live=true do-timestamp=true name=src ! application/x-rtp"
+	pipelineStr := "appsrc name=src ! application/x-rtp"
 
 	switch codecName {
 	case "vp8":
-		pipelineStr += ", encoding-name=VP8-DRAFT-IETF-01 ! rtpvp8depay ! decodebin ! " + dst
+		pipelineStr += ", encoding-name=VP8-DRAFT-IETF-01 ! rtpjitterbuffer ! queue ! rtpvp8depay ! decodebin ! " + dst
 
 	case "vp9":
-		pipelineStr += ", encoding-name=VP9-DRAFT-IETF-01 ! rtpvp9depay ! decodebin ! " + dst
+		pipelineStr += ", encoding-name=VP9-DRAFT-IETF-01 ! rtpjitterbuffer ! queue ! rtpvp9depay ! decodebin ! " + dst
 
 	case "h264":
-		pipelineStr += " ! rtpjitterbuffer ! queue ! rtph264depay ! decodebin ! videoconvert ! " + dst
+		pipelineStr += " ! rtpjitterbuffer ! queue ! rtph264depay ! h264parse ! avdec_h264 ! " + dst
 
 	default:
 		return nil, UnknownCodecError
 	}
+	fmt.Println(pipelineStr)
 
 	pipelineStrUnsafe := C.CString(pipelineStr)
 	defer C.free(unsafe.Pointer(pipelineStrUnsafe))

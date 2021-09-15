@@ -24,15 +24,15 @@ index d713779..5c4800b 100644
  github.com/mengelbart/rtq-go v0.1.1-0.20210913160810-c84302426051/go.mod h1:EquMSHI/xC5jJ3OZsdM/7u2ZOG2IXUJdsL3If0hI5LU=
  github.com/mengelbart/scream-go v0.2.2/go.mod h1:Yre6kUFLW62SKaIjBBZF/E93fEBqcCqn6bZyrjljd5k=
 diff --git a/tools/run_endpoint.sh b/tools/run_endpoint.sh
-index daea9a1..16c2260 100644
+index 8cb3cc0..b1c8c23 100644
 --- a/tools/run_endpoint.sh
 +++ b/tools/run_endpoint.sh
 @@ -10,7 +10,7 @@ if [ "$ROLE" == "sender" ]; then
+     # Wait for the simulator to start up.
+     #/wait-for-it.sh sim:57832 -s -t 10
      echo "Starting RTQ sender..."
-     echo "Sending video to $RECEIVER"
-     echo "Sender params: $SENDER_PARAMS"
 -    QUIC_GO_LOG_LEVEL=error ./rtq send -addr $RECEIVER $SENDER_PARAMS $VIDEOS
 +    QUIC_GO_LOG_LEVEL=error ./rtq send -addr $RECEIVER -cc scream-infer $SENDER_PARAMS $VIDEOS
  else
      echo "Running RTQ receiver."
-     QUIC_GO_LOG_LEVEL=error ./rtq receive $DESTINATION
+     QUIC_GO_LOG_LEVEL=error ./rtq receive $RECEIVER_PARAMS $DESTINATION

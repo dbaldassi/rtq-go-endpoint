@@ -169,13 +169,13 @@ func (s *Sender) runSCReAMStats(statsLogger io.WriteCloser, cc *scream.SenderInt
 	for {
 		select {
 		case <-ticker.C:
-			kbps, err := cc.GetTargetBitrate(0)
+			bps, err := cc.GetTargetBitrate(0)
 			if err != nil {
 				log.Printf("failed to get target bitrate: %v\n", err)
 			}
 			t := time.Since(start).Milliseconds()
-			if kbps > 0 && s.pipeline != nil && lastBitrate != uint(kbps) {
-				lastBitrate = uint(kbps)
+			if bps > 0 && s.pipeline != nil && lastBitrate != uint(bps) {
+				lastBitrate = uint(bps)
 				s.pipeline.SetBitRate(lastBitrate)
 			}
 			if statsLogger != nil {
@@ -185,7 +185,7 @@ func (s *Sender) runSCReAMStats(statsLogger io.WriteCloser, cc *scream.SenderInt
 				// rateAcked, rateLost, rateCe, hiSeqAck
 				stats := cc.GetStatistics()
 				// time, bitrate, stats
-				fmt.Fprintf(statsLogger, "%v, %v,\t%v\n", t, lastBitrate, stats)
+				fmt.Fprintf(statsLogger, "%v, %v,\t%v\n", t, bps, stats)
 			}
 		case <-s.closeC:
 			return

@@ -10,6 +10,7 @@ import "C"
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"sync"
@@ -35,24 +36,25 @@ type Pipeline struct {
 	writer      io.Writer
 	pipelineStr string
 	payloder    string
+	codec       string
 }
 
-func NewPipeline(codecName, src string, w io.Writer) (*Pipeline, error) {
+func NewPipeline(codec, src string, w io.Writer) (*Pipeline, error) {
 	pipelineStr := "appsink name=appsink"
 	var payloader string
 
-	switch codecName {
+	switch codec {
 	case "vp8":
 		payloader = "rtpvp8pay"
-		pipelineStr = src + "! vp8enc error-resilient=partitions keyframe-max-dist=10 auto-alt-ref=true cpu-used=5 deadline=1 ! rtpvp8pay name=rtpvp8pay mtu=1200 ! " + pipelineStr
+		pipelineStr = src + "! vp8enc name=encoder error-resilient=partitions keyframe-max-dist=10 auto-alt-ref=true cpu-used=5 deadline=1 ! rtpvp8pay name=rtpvp8pay mtu=1000 ! " + pipelineStr
 
 	case "vp9":
 		payloader = "rtpvp9pay"
-		pipelineStr = src + " ! vp9enc keyframe-max-dist=10 auto-alt-ref=true cpu-used=5 ! rtpvp9pay name=rtpvp9pay mtu=1200 ! " + pipelineStr
+		pipelineStr = src + " ! vp9enc name=encoder keyframe-max-dist=10 auto-alt-ref=true cpu-used=5 ! rtpvp9pay name=rtpvp9pay mtu=1000 ! " + pipelineStr
 
 	case "h264":
 		payloader = "rtph264pay"
-		pipelineStr = src + " ! x264enc name=x264enc bitrate=1 speed-preset=ultrafast tune=zerolatency key-int-max=20 ! video/x-h264 ! rtph264pay name=rtph264pay mtu=1200 ! " + pipelineStr
+		pipelineStr = src + " ! x264enc name=encoder pass=5 speed-preset=4 tune=4 ! rtph264pay name=rtph264pay mtu=1000 ! " + pipelineStr
 
 	default:
 		return nil, UnknownCodecError
@@ -69,6 +71,7 @@ func NewPipeline(codecName, src string, w io.Writer) (*Pipeline, error) {
 		pipeline:    C.gstreamer_send_create_pipeline(pipelineStrUnsafe),
 		pipelineStr: pipelineStr,
 		payloder:    payloader,
+		codec:       codec,
 		writer:      w,
 	}
 	pipelines[sp.id] = sp
@@ -102,24 +105,55 @@ func goHandleSendEOS() {
 	eosHandler()
 }
 
+func (p *Pipeline) setPropertyUint(name string, prop string, value uint) {
+	cName := C.CString(name)
+	cProp := C.CString(prop)
+	cValue := C.uint(value)
+
+	defer C.free(unsafe.Pointer(cName))
+	defer C.free(unsafe.Pointer(cProp))
+
+	C.gstreamer_send_set_property_uint(p.pipeline, cName, cProp, cValue)
+}
+
+func (p *Pipeline) getPropertyUint(name string, prop string) uint {
+	cName := C.CString(name)
+	cProp := C.CString(prop)
+
+	defer C.free(unsafe.Pointer(cName))
+	defer C.free(unsafe.Pointer(cProp))
+
+	return uint(C.gstreamer_get_property_uint(p.pipeline, cName, cProp))
+}
+
 func (p *Pipeline) SSRC() uint {
-	payloderStrUnsafe := C.CString(p.payloder)
-	defer C.free(unsafe.Pointer(payloderStrUnsafe))
-	return uint(C.gstreamer_send_get_ssrc(p.pipeline, payloderStrUnsafe))
+	return p.getPropertyUint(p.payloder, "ssrc")
 }
 
 func (p *Pipeline) SetSSRC(ssrc uint) {
-	payloaderStrUnsafe := C.CString(p.payloder)
-	defer C.free(unsafe.Pointer(payloaderStrUnsafe))
-	C.gstreamer_send_set_ssrc(p.pipeline, payloaderStrUnsafe, C.uint(ssrc))
+	p.setPropertyUint(p.payloder, "ssrc", ssrc)
 }
 
 func (p *Pipeline) SetBitRate(bitrate uint) {
-	C.gstreamer_send_set_bitrate(p.pipeline, C.uint(bitrate))
+	value := bitrate
+	prop := "bitrate"
+	if p.codec == "vp8" || p.codec == "vp9" {
+		prop = "target-bitrate"
+	} else if p.codec == "h264" {
+		value = value / 1000
+	}
+	previous := p.getPropertyUint("encoder", prop)
+	p.setPropertyUint("encoder", prop, value)
+	next := p.getPropertyUint("encoder", prop)
+	fmt.Printf("updating bitrate for codec %v: %v => %v (got %v, value=%v)\n", p.codec, previous, next, bitrate, value)
 }
 
 func (p *Pipeline) GetBitrate() uint {
-	return uint(C.gstreamer_send_get_bitrate(p.pipeline))
+	prop := "bitrate"
+	if p.codec == "vp8" || p.codec == "vp9" {
+		prop = "target-bitrate"
+	}
+	return p.getPropertyUint(p.codec, prop)
 }
 
 //export goHandlePipelineBuffer

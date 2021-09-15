@@ -89,26 +89,23 @@ void gstreamer_send_destroy_pipeline(GstElement* pipeline) {
     gst_object_unref(pipeline);
 }
 
-unsigned int gstreamer_send_get_ssrc(GstElement* pipeline, char *payloader) {
-    GstElement* rtph264pay = gst_bin_get_by_name(GST_BIN(pipeline), payloader);
-    unsigned int ssrc = 0;
-    g_object_get(rtph264pay, "ssrc", &ssrc, NULL);
-    return ssrc;
+unsigned int gstreamer_get_property_uint(GstElement* pipeline, char *name, char *prop) {
+    GstElement* element;
+    element = gst_bin_get_by_name(GST_BIN(pipeline), name);
+    unsigned int value = 0;
+
+    if (element) {
+        g_object_get(element, prop, &value, NULL);
+    }
+    return value;
 }
 
-void gstreamer_send_set_ssrc(GstElement* pipeline, char *payloader, unsigned int ssrc) {
-    GstElement* rtph264pay = gst_bin_get_by_name(GST_BIN(pipeline), payloader);
-    g_object_set(rtph264pay, "ssrc", ssrc, NULL);
-}
+void gstreamer_send_set_property_uint(GstElement* pipeline, char *name, char *prop, unsigned int value) {
+    GstElement* element;
+    element = gst_bin_get_by_name(GST_BIN(pipeline), name);
 
-void gstreamer_send_set_bitrate(GstElement* pipeline, unsigned int bitrate) {
-    GstElement* x264enc = gst_bin_get_by_name(GST_BIN(pipeline), "x264enc");
-    g_object_set(x264enc, "bitrate", bitrate, NULL);
-}
-
-unsigned int gstreamer_send_get_bitrate(GstElement* pipeline) {
-    GstElement* x264enc = gst_bin_get_by_name(GST_BIN(pipeline), "x264enc");
-    unsigned int bitrate = 0;
-    g_object_get(x264enc, "bitrate", &bitrate, NULL);
-    return bitrate;
+    if (element) {
+        g_object_set(element, prop, value, NULL);
+        gst_object_unref(element);
+    }
 }
