@@ -27,7 +27,7 @@ COPY . .
 
 RUN go build -tags scream -o /out/rtq main.go
 
-FROM martenseemann/quic-network-simulator-endpoint:latest
+FROM ubuntu:20.04
 
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -yqq \
         libgstreamer1.0-0 \
@@ -43,7 +43,10 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -yqq \
         gstreamer1.0-gl \
         gstreamer1.0-gtk3 \
         gstreamer1.0-qt5 \
-        gstreamer1.0-pulseaudio
+        gstreamer1.0-pulseaudio \
+	iproute2 \
+	iputils-ping \
+	iperf3
 
 COPY --from=build \
         /out/rtq \

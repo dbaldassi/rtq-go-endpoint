@@ -2,11 +2,13 @@
 set -e
 
 # Set up the routing needed for the simulation.
-/setup.sh
+#/setup.sh
+
+mkdir -p /logs/qlog
 
 if [ "$ROLE" == "sender" ]; then
     # Wait for the simulator to start up.
-    /wait-for-it.sh sim:57832 -s -t 10
+    #/wait-for-it.sh sim:57832 -s -t 10
     echo "Starting RTQ sender..."
     echo "Sending video to $RECEIVER"
     echo "Sender params: $SENDER_PARAMS"
