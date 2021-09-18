@@ -6,6 +6,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/mengelbart/rtq-go-endpoint/internal/utils"
 	screamcgo "github.com/mengelbart/scream-go"
 	"github.com/pion/interceptor"
 	"github.com/pion/rtp"
@@ -27,26 +28,32 @@ func getTimeBetweenNTP(t0 float64, tx time.Time) uint64 {
 	return ntp
 }
 
+type Metricer interface {
+	Metrics() utils.RTTStats
+}
+
 type fbInferer struct {
 	rtpConn  AckingRTPWriter
 	rx       *screamcgo.Rx
 	received chan []byte
 	acked    chan ackedPkt
-	rtt      time.Duration
 	t0       float64
+	m        Metricer
 }
 
-func newFBInferer(w AckingRTPWriter, rx *screamcgo.Rx, received chan []byte) *fbInferer {
+func newFBInferer(w AckingRTPWriter, rx *screamcgo.Rx, received chan []byte, m Metricer) *fbInferer {
 	return &fbInferer{
 		rtpConn:  w,
 		rx:       rx,
 		received: received,
 		acked:    make(chan ackedPkt, 1000),
 		t0:       getNTPT0(),
+		m:        m,
 	}
 }
 
 type ackedPkt struct {
+	sentTS    time.Time
 	receiveTS time.Time
 	ssrc      uint32
 	size      int
@@ -63,6 +70,8 @@ func (f *fbInferer) buffer(cancel chan struct{}) {
 	for {
 		select {
 		case pkt := <-f.acked:
+			metrics := f.m.Metrics()
+			pkt.receiveTS = pkt.sentTS.Add(metrics.SmoothedRTT / 2)
 			buf = append(buf, pkt)
 
 		case <-t.C:
@@ -96,13 +105,12 @@ func (f *fbInferer) rtpWriterFunc(header *rtp.Header, payload []byte, attributes
 		if !r {
 			return // ignore lost packets
 		}
-		arrivalTime := t.Add(f.rtt / 2)
 		go func() {
 			f.acked <- ackedPkt{
-				receiveTS: arrivalTime,
-				ssrc:      header.SSRC,
-				size:      n,
-				seqNr:     header.SequenceNumber,
+				sentTS: t,
+				ssrc:   header.SSRC,
+				size:   n,
+				seqNr:  header.SequenceNumber,
 			}
 		}()
 	})

@@ -11,6 +11,7 @@ import (
 	"math/big"
 
 	"github.com/lucas-clemente/quic-go"
+	"github.com/lucas-clemente/quic-go/logging"
 	"github.com/lucas-clemente/quic-go/qlog"
 	"github.com/mengelbart/rtq-go"
 	"github.com/mengelbart/rtq-go-endpoint/internal/utils"
@@ -51,7 +52,7 @@ func NewQUICServer(addr string) (*QUIC, error) {
 	}, nil
 }
 
-func NewQUICClient(addr string) (*QUIC, error) {
+func NewQUICClient(addr string, t ...logging.Tracer) (*QUIC, error) {
 	tlsConfig := &tls.Config{
 		InsecureSkipVerify: true,
 		NextProtos:         []string{"rtq"},
@@ -63,8 +64,15 @@ func NewQUICClient(addr string) (*QUIC, error) {
 	if err != nil {
 		return nil, fmt.Errorf("could not get qlog writer: %w", err)
 	}
+	var tracers []logging.Tracer
 	if qlogWriter != nil {
-		quicConf.Tracer = qlog.NewTracer(qlogWriter)
+		tracers = append(tracers, qlog.NewTracer(qlogWriter))
+	}
+	if len(t) > 0 {
+		tracers = append(tracers, t...)
+	}
+	if len(tracers) > 0 {
+		logging.NewMultiplexedTracer(tracers...)
 	}
 	quicSession, err := quic.DialAddr(addr, tlsConfig, quicConf)
 	if err != nil {

@@ -92,10 +92,17 @@ func send(src, proto, remote, codec, rtcc string) {
 	var w rtc.RTPWriter
 	var r io.Reader
 	var cancel func() error
+	var metricer rtc.Metricer
 	switch proto {
 	case QUIC:
 
-		q, err := transport.NewQUICClient(remote)
+		var rttTracer *utils.RTTTracer
+		if rtcc == SCREAM_INFER {
+			rttTracer = utils.NewTracer()
+			metricer = rttTracer
+		}
+		q, err := transport.NewQUICClient(remote, rttTracer)
+
 		if err != nil {
 			log.Fatalf("failed to open RTQ session: %v", err)
 		}
@@ -165,7 +172,7 @@ func send(src, proto, remote, codec, rtcc string) {
 		if err != nil {
 			log.Fatal(err)
 		}
-		err = sender.ConfigureInferingSCReAMInterceptor(cclog, w.(rtc.AckingRTPWriter))
+		err = sender.ConfigureInferingSCReAMInterceptor(cclog, w.(rtc.AckingRTPWriter), metricer)
 		if err != nil {
 			log.Fatal(err)
 		}
