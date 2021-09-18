@@ -10,22 +10,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [
-          newreno,
-          nocc,
-          scream,
-          scream-infer,
-          scream-infer-newreno,
-          scream-newreno,
-          stream-newreno,
-          stream-nocc,
-          stream-scream,
-          stream-scream-infer,
-          stream-scream-infer-newreno,
-          stream-scream-newren,
-          udp-nocc,
-          udp-scream
-        ]
+        variant: [ newreno, nocc]
     steps:
       - name: Checkout code
         uses: actions/checkout@v2
