@@ -400,109 +400,55 @@ func receive(dst, proto, remote, codec, rtcc string, stream bool) error {
 	return nil
 }
 
-type loggingStreamReader struct {
-	r              io.Reader
-	logger         io.Writer
-	sequenceNumber uint64
-	start          time.Time
-}
-
-func (l *loggingStreamReader) Read(p []byte) (n int, err error) {
-	n, err = l.r.Read(p)
-	fmt.Fprintf(l.logger, "%v, %v, %v\n", time.Since(l.start).Milliseconds(), l.sequenceNumber, n)
-	return
-}
-
-func receiveStreamData(ctx context.Context, q *transport.QUIC, start time.Time, logger io.WriteCloser) error {
+func receiveStreamData(ctx context.Context, q *transport.QUIC, start time.Time, logger io.Writer) error {
 	stream, err := q.AcceptUniStream(ctx)
 	if err != nil {
 		return err
 	}
-	defer logger.Close()
 
-	var nextPacket streamDataPacket
-
-	lsr := loggingStreamReader{
-		r:              stream,
-		logger:         logger,
-		sequenceNumber: 0,
-		start:          start,
-	}
-
+	buffer := make([]byte, streamDataPacketLength)
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
 		default:
-
-			headerReader := io.LimitReader(&lsr, 16)
-			headerBytes, err := ioutil.ReadAll(headerReader)
+			n, err := stream.Read(buffer)
 			if err != nil {
 				return err
 			}
-			if len(headerBytes) != 16 {
-				return fmt.Errorf("read wrong number of bytes from header, got: %v but want: %v", len(headerBytes), 16)
-			}
-			if err := nextPacket.UnmarshalBinary(headerBytes); err != nil {
-				return err
-			}
-
-			if nextPacket.sequenceNumber != lsr.sequenceNumber {
-				return fmt.Errorf("received unexpected sequenceNumber, expected: %v, got %v", nextPacket.sequenceNumber, lsr.sequenceNumber)
-			}
-
-			bodyReader := io.LimitReader(&lsr, int64(nextPacket.length))
-			bodyBytes, err := ioutil.ReadAll(bodyReader)
-			if err != nil {
-				return err
-			}
-			if uint64(len(bodyBytes)) != nextPacket.length {
-				return fmt.Errorf("read wrong number of bytes from body, got: %v but want: %v", len(bodyBytes), nextPacket.length)
-			}
-
-			lsr.sequenceNumber++
+			fmt.Fprintf(logger, "%v, %v\n", time.Since(start).Milliseconds(), n)
 		}
 	}
 }
 
-const streamDataPacketLength = 1484
+const streamDataPacketLength = 1400
 
 //const streamDataPacketLength = 64_000
 
-func sendStreamData(ctx context.Context, q *transport.QUIC, start time.Time, logger io.WriteCloser) error {
+func sendStreamData(ctx context.Context, q *transport.QUIC, start time.Time, logger io.Writer) error {
 	stream, err := q.OpenUniStream()
 	if err != nil {
 		return err
 	}
 	defer stream.Close()
-	defer logger.Close()
 
-	nextSequenceNumber := uint64(0)
+	buffer := make([]byte, streamDataPacketLength)
+
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
 		default:
-			p := streamDataPacket{
-				sequenceNumber: nextSequenceNumber,
-				length:         streamDataPacketLength,
-				data:           make([]byte, streamDataPacketLength),
-			}
-			_, err := rand.Read(p.data)
-			if err != nil {
-				return err
-			}
-			bs, err := p.MarshalBinary()
-			if err != nil {
-				return err
-			}
-			nextSequenceNumber++
 
-			n, err := stream.Write(bs)
+			_, err := rand.Read(buffer)
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(logger, "%v, %v, %v\n", time.Since(start).Milliseconds(), p.sequenceNumber, n)
+			n, err := stream.Write(buffer)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(logger, "%v, %v\n", time.Since(start).Milliseconds(), n)
 		}
 	}
 }
