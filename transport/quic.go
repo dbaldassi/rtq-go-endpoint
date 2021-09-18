@@ -19,7 +19,8 @@ import (
 )
 
 type QUIC struct {
-	session *rtq.Session
+	rtqSession  *rtq.Session
+	quicSession quic.Session
 }
 
 func NewQUICServer(addr string) (*QUIC, error) {
@@ -48,7 +49,8 @@ func NewQUICServer(addr string) (*QUIC, error) {
 		return nil, err
 	}
 	return &QUIC{
-		session: rtqSession,
+		rtqSession:  rtqSession,
+		quicSession: quicSession,
 	}, nil
 }
 
@@ -83,7 +85,8 @@ func NewQUICClient(addr string, t ...logging.Tracer) (*QUIC, error) {
 		return nil, err
 	}
 	return &QUIC{
-		session: rtqSession,
+		rtqSession:  rtqSession,
+		quicSession: quicSession,
 	}, nil
 }
 
@@ -101,7 +104,7 @@ func (q *WriteFlowCloser) WriteRTCP(pkts []rtcp.Packet) (int, error) {
 }
 
 func (q *QUIC) Writer(id uint64) (*WriteFlowCloser, error) {
-	f, err := q.session.OpenWriteFlow(id)
+	f, err := q.rtqSession.OpenWriteFlow(id)
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +120,7 @@ type ReadFlowCloser struct {
 }
 
 func (q *QUIC) Reader(id uint64) (*ReadFlowCloser, error) {
-	f, err := q.session.AcceptFlow(id)
+	f, err := q.rtqSession.AcceptFlow(id)
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +131,15 @@ func (q *QUIC) Reader(id uint64) (*ReadFlowCloser, error) {
 }
 
 func (q *QUIC) Close() error {
-	return q.session.Close()
+	return q.rtqSession.Close()
+}
+
+func (q *QUIC) AcceptUniStream(ctx context.Context) (quic.ReceiveStream, error) {
+	return q.quicSession.AcceptUniStream(ctx)
+}
+
+func (q *QUIC) OpenUniStream() (quic.SendStream, error) {
+	return q.quicSession.OpenUniStream()
 }
 
 // Setup a bare-bones TLS config for the server

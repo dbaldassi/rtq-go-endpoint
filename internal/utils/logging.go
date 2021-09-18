@@ -63,6 +63,14 @@ func GetCCStatLogWriter() (io.WriteCloser, error) {
 	return getFileLogWriter(logFilename)
 }
 
+func GetStreamLogWriter() (io.WriteCloser, error) {
+	logFilename := os.Getenv("STREAMLOGFILE")
+	if len(logFilename) == 0 {
+		return NopCloser{Writer: os.Stdout}, nil
+	}
+	return getFileLogWriter(logFilename)
+}
+
 // GetQLOGWriter creates the QLOGDIR and returns the GetLogWriter callback
 func GetQLOGWriter() (func(perspective logging.Perspective, connID []byte) io.WriteCloser, error) {
 	qlogDir := os.Getenv("QLOGDIR")
