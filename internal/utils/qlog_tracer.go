@@ -56,7 +56,9 @@ func NewTracer() *RTTTracer {
 }
 
 func (q *RTTTracer) TracerForConnection(ctx context.Context, p logging.Perspective, odcid logging.ConnectionID) logging.ConnectionTracer {
-	return &ConnectionRTTTracer{}
+	return &ConnectionRTTTracer{
+		t: q,
+	}
 }
 
 func (q *RTTTracer) SentPacket(addr net.Addr, header *logging.Header, count logging.ByteCount, frames []logging.Frame) {
