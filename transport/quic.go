@@ -74,7 +74,7 @@ func NewQUICClient(addr string, t ...logging.Tracer) (*QUIC, error) {
 		tracers = append(tracers, t...)
 	}
 	if len(tracers) > 0 {
-		logging.NewMultiplexedTracer(tracers...)
+		quicConf.Tracer = logging.NewMultiplexedTracer(tracers...)
 	}
 	quicSession, err := quic.DialAddr(addr, tlsConfig, quicConf)
 	if err != nil {

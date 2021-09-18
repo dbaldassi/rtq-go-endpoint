@@ -88,7 +88,7 @@ func NewSender(w RTPWriter, r io.Reader, opts ...SenderOption) (*Sender, error) 
 	return s, nil
 }
 
-func (s *Sender) ConfigureInferingSCReAMInterceptor(statsLogger io.WriteCloser, w AckingRTPWriter, m Metricer) error {
+func (s *Sender) ConfigureInferingSCReAMInterceptor(statsLogger io.Writer, w AckingRTPWriter, m Metricer) error {
 	fbc := make(chan []byte, 1_000_000)
 	s.inferFeedback(fbc)
 
@@ -110,7 +110,7 @@ func (s *Sender) ConfigureInferingSCReAMInterceptor(statsLogger io.WriteCloser, 
 	return nil
 }
 
-func (s *Sender) inferFeedback(fbc <-chan []byte) error {
+func (s *Sender) inferFeedback(fbc <-chan []byte) {
 	go func() {
 		defer log.Println("finish infering feedback")
 		for {
@@ -124,10 +124,9 @@ func (s *Sender) inferFeedback(fbc <-chan []byte) error {
 			}
 		}
 	}()
-	return nil
 }
 
-func (s *Sender) ConfigureSCReAMInterceptor(statsLogger io.WriteCloser) error {
+func (s *Sender) ConfigureSCReAMInterceptor(statsLogger io.Writer) error {
 	tx := screamcgo.NewTx()
 	cc, err := scream.NewSenderInterceptor(scream.Tx(tx))
 	if err != nil {
@@ -161,8 +160,7 @@ func (s *Sender) AcceptFeedback() error {
 	return nil
 }
 
-func (s *Sender) runSCReAMStats(statsLogger io.WriteCloser, cc *scream.SenderInterceptor) {
-	defer statsLogger.Close()
+func (s *Sender) runSCReAMStats(statsLogger io.Writer, cc *scream.SenderInterceptor) {
 	ticker := time.NewTicker(20 * time.Millisecond)
 	start := time.Now()
 	var lastBitrate uint
@@ -193,7 +191,7 @@ func (s *Sender) runSCReAMStats(statsLogger io.WriteCloser, cc *scream.SenderInt
 	}
 }
 
-func (s *Sender) ConfigureRTPLogInterceptor(rtcpIn, rtcpOut, rtpIn, rtpOut io.WriteCloser) {
+func (s *Sender) ConfigureRTPLogInterceptor(rtcpIn, rtcpOut, rtpIn, rtpOut io.Writer) {
 	i := utils.NewRTPLogInterceptor(rtcpIn, rtcpOut, rtpIn, rtpOut)
 	s.ir.Add(i)
 }
@@ -259,40 +257,34 @@ func (s *Sender) Start() error {
 
 	go gstsrc.StartMainLoop()
 
-	go func() {
-		select {
-		case <-eosC:
-			log.Println("eos")
-		case err := <-errC:
-			log.Printf("got error from interceptorWriter: %v\n", err)
-			go func() {
-				for range s.packet {
-				}
-			}()
-			s.pipeline.Stop()
-		case err := <-s.feedbackErrC:
-			log.Printf("got error from feedback Acceptor: %v\n", err)
-			s.pipeline.Stop()
-		case <-s.closeC:
-			s.pipeline.Stop()
-		}
-		iw.close()
-		s.i.Close()
-		select {
-		case <-eosC:
-		case <-time.After(3 * time.Second):
-			log.Printf("timeout")
-		}
-		if s.notifyC != nil {
-			s.notifyC <- struct{}{}
-		}
-	}()
+	select {
+	case <-eosC:
+		log.Println("eos")
+	case err := <-errC:
+		log.Printf("got error from interceptorWriter: %v\n", err)
+		go func() {
+			for range s.packet {
+			}
+		}()
+		s.pipeline.Stop()
+	case err := <-s.feedbackErrC:
+		log.Printf("got error from feedback Acceptor: %v\n", err)
+		s.pipeline.Stop()
+	case <-s.closeC:
+		s.pipeline.Stop()
+	}
+	iw.close()
+	s.i.Close()
+	select {
+	case <-eosC:
+	case <-time.After(3 * time.Second):
+		log.Printf("timeout")
+	}
+	if s.notifyC != nil {
+		s.notifyC <- struct{}{}
+	}
 
 	return nil
-}
-
-func (s *Sender) NotifyDone(c chan<- struct{}) {
-	s.notifyC = c
 }
 
 func (s *Sender) Close() error {

@@ -14,6 +14,7 @@ import (
 	"os/signal"
 	"time"
 
+	"github.com/lucas-clemente/quic-go/logging"
 	"github.com/mengelbart/rtq-go-endpoint/internal/utils"
 	"github.com/mengelbart/rtq-go-endpoint/rtc"
 	"github.com/mengelbart/rtq-go-endpoint/transport"
@@ -58,7 +59,7 @@ func main() {
 	)
 	for _, fs := range []*flag.FlagSet{sendCmd, receiveCmd} {
 		fs.StringVar(&addr, "addr", ":4242", "addr host the receiver or to connect the sender to")
-		fs.StringVar(&codec, "codec", H264, "Video Codec")
+		fs.StringVar(&codec, "codec", H264, fmt.Sprintf("Video Codec, options: '%v', '%v', '%v'", H264, VP8, VP9))
 		fs.StringVar(&proto, "transport", QUIC, fmt.Sprintf("Transport to use, options: '%v', '%v'", QUIC, UDP))
 		fs.StringVar(&rtcc, "cc", NOCC, fmt.Sprintf("Real-time Congestion Controller to use, options: '%v', '%v', '%v'", NOCC, SCREAM, SCREAM_INFER))
 		fs.BoolVar(&stream, "stream", false, "send data on a QUIC stream in parallel (only effective if proto=quic)")
@@ -72,23 +73,31 @@ func main() {
 	}
 	switch os.Args[1] {
 	case "send":
-		sendCmd.Parse(os.Args[2:])
+		if err := sendCmd.Parse(os.Args[2:]); err != nil {
+			log.Fatal(err)
+		}
 		files := sendCmd.Args()
 		log.Printf("src files: %v\n", files)
 		src := "videotestsrc"
 		if len(files) > 0 {
 			src = fmt.Sprintf("filesrc location=%v ! queue ! decodebin ! videoconvert ", files[0])
 		}
-		send(src, proto, addr, codec, rtcc, stream)
+		if err := send(src, proto, addr, codec, rtcc, stream); err != nil {
+			log.Fatal(err)
+		}
 	case "receive":
-		receiveCmd.Parse(os.Args[2:])
+		if err := receiveCmd.Parse(os.Args[2:]); err != nil {
+			log.Fatal(err)
+		}
 		files := receiveCmd.Args()
 		log.Printf("dst file: %v\n", files)
 		dst := "autovideosink"
 		if len(files) > 0 {
 			dst = fmt.Sprintf("matroskamux ! filesink location=%v", files[0])
 		}
-		receive(dst, proto, addr, codec, rtcc, stream)
+		if err := receive(dst, proto, addr, codec, rtcc, stream); err != nil {
+			log.Fatal(err)
+		}
 	default:
 		fmt.Printf("unknown command: %v\n", os.Args[1])
 		fmt.Println("expected 'send' or 'receive' subcommands")
@@ -96,75 +105,103 @@ func main() {
 	}
 }
 
-func send(src, proto, remote, codec, rtcc string, stream bool) {
+func closeErr(closeFn func() error) {
+	if err := closeFn(); err != nil {
+		log.Printf("close failed: %v\n", err)
+	}
+}
+
+func send(src, proto, remote, codec, rtcc string, stream bool) error {
 	start := time.Now()
 
 	var w rtc.RTPWriter
 	var r io.Reader
-	var cancel func() error
 	var metricer rtc.Metricer
+
 	switch proto {
 	case QUIC:
 
-		var rttTracer *utils.RTTTracer
+		var tracers []logging.Tracer
 		if rtcc == SCREAM_INFER {
-			rttTracer = utils.NewTracer()
+			rttTracer := utils.NewTracer()
+			tracers = append(tracers, rttTracer)
 			metricer = rttTracer
 		}
-		q, err := transport.NewQUICClient(remote, rttTracer)
+		q, err := transport.NewQUICClient(remote, tracers...)
+		if err != nil {
+			return fmt.Errorf("failed to open RTQ session: %v", err)
+		}
+		defer closeErr(q.Close)
 
+		writeCloser, err := q.Writer(0)
 		if err != nil {
-			log.Fatalf("failed to open RTQ session: %v", err)
+			return fmt.Errorf("failed to open RTQ write flow: %v", err)
 		}
-		w, err = q.Writer(0)
+		defer closeErr(writeCloser.Close)
+		w = writeCloser
+
+		readCloser, err := q.Reader(1)
 		if err != nil {
-			log.Fatalf("failed to open RTQ write flow: %v", err)
+			return fmt.Errorf("failed to open RTQ read flow: %v", err)
 		}
-		r, err = q.Reader(1)
-		if err != nil {
-			log.Fatalf("failed to open RTQ read flow: %v", err)
-		}
-		cancel = q.Close
+		defer closeErr(readCloser.Close)
+		r = readCloser
 
 		if stream {
 			l, err := utils.GetStreamLogWriter()
 			if err != nil {
-				log.Fatal(err)
+				return fmt.Errorf("failed to get stream log writer: %v", err)
 			}
+			defer closeErr(l.Close)
+
 			ctx, cancelCtx := context.WithCancel(context.Background())
 			go func() {
 				err := sendStreamData(ctx, q, start, l)
+				if err != nil && err.Error() == "Application error 0x0: eos" {
+					log.Printf("stream sender done after EOS")
+					return
+				}
 				if err != nil {
-					log.Fatalf("failed to send stream data: %v", err)
+					log.Fatalf("failed to send stream data: %v", err) // TODO: return error to main goroutine
 				}
 			}()
-			cancelTmp := cancel // TODO: Is this necessary?
-			cancel = func() error {
-				cancelCtx()
-				return cancelTmp()
-			}
+			defer cancelCtx()
 		}
 
 	case UDP:
 
-		q, err := transport.NewUDPClient(remote)
+		u, err := transport.NewUDPClient(remote)
 		if err != nil {
-			log.Fatalf("failed to open UDP session: %v", err)
+			return fmt.Errorf("failed to open UDP session: %v", err)
 		}
-		wr, err := q.Writer(0)
+		defer closeErr(u.Close)
+
+		writeCloser, err := u.Writer(0)
 		if err != nil {
-			log.Fatalf("failed to open UDP write flow: %v", err)
+			return fmt.Errorf("failed to open UDP write flow: %v", err)
 		}
-		r, err = q.Reader(1)
+		defer closeErr(writeCloser.Close)
+		w = writeCloser
+
+		readCloser, err := u.Reader(1)
 		if err != nil {
-			log.Fatalf("failed to open UDP read flow: %v", err)
+			return fmt.Errorf("failed to open UDP read flow: %v", err)
 		}
-		w = wr
-		cancel = wr.Close
+		defer closeErr(readCloser.Close)
+		r = readCloser
 
 	default:
-		log.Fatalf("unknown transport protocol: %v", proto)
+		return fmt.Errorf("unknown transport protocol: %v", proto)
 	}
+
+	rtpLogger, err := utils.GetRTPLogWriter()
+	if err != nil {
+		return fmt.Errorf("failed to get RTP log writer: %v", err)
+	}
+	rtcpInLog := rtpLogger("rtcp_in")
+	rtpOutLog := rtpLogger("rtp_out")
+	defer closeErr(rtcpInLog.Close)
+	defer closeErr(rtpOutLog.Close)
 
 	sender, err := rtc.NewSender(
 		w,
@@ -173,48 +210,55 @@ func send(src, proto, remote, codec, rtcc string, stream bool) {
 		rtc.SenderSrc(src),
 	)
 	if err != nil {
-		log.Fatalf("failed to create RTP sender: %v", err)
+		return fmt.Errorf("failed to create RTP sender: %v", err)
 	}
+	defer closeErr(sender.Close)
 
-	rtpLogger, err := utils.GetRTPLogWriter()
-	if err != nil {
-		log.Fatal(err)
-	}
-	sender.ConfigureRTPLogInterceptor(rtpLogger("rtcp_in"), utils.NopCloser{Writer: ioutil.Discard}, utils.NopCloser{Writer: ioutil.Discard}, rtpLogger("rtp_out"))
+	sender.ConfigureRTPLogInterceptor(rtcpInLog, ioutil.Discard, ioutil.Discard, rtpOutLog)
 
 	switch rtcc {
 	case SCREAM:
 		cclog, err := utils.GetCCStatLogWriter()
 		if err != nil {
-			log.Fatal(err)
+			return fmt.Errorf("failed to get CC stats log writer: %v", err)
 		}
+		defer closeErr(cclog.Close)
+
 		err = sender.ConfigureSCReAMInterceptor(cclog)
 		if err != nil {
-			log.Fatal(err)
+			return fmt.Errorf("failed to configure SCReAM interceptor: %v", err)
 		}
-		err = sender.AcceptFeedback()
+		err = sender.AcceptFeedback() // TODO: Check if goroutine needs explicit close
 		if err != nil {
-			log.Fatal(err)
+			return fmt.Errorf("failed to start SCReAM feedback acceptor: %v", err)
 		}
+
 	case SCREAM_INFER:
 		cclog, err := utils.GetCCStatLogWriter()
 		if err != nil {
-			log.Fatal(err)
+			return fmt.Errorf("failed to get CC stats log writer: %v", err)
 		}
+		defer closeErr(cclog.Close)
+
 		err = sender.ConfigureInferingSCReAMInterceptor(cclog, w.(rtc.AckingRTPWriter), metricer)
 		if err != nil {
-			log.Fatal(err)
+			return fmt.Errorf("failed to configure inferring SCReAM interceptor: %v", err)
 		}
+
 	default:
 		log.Printf("unknown cc: %v\n", rtcc)
 	}
 
 	done := make(chan struct{})
-	sender.NotifyDone(done)
-	err = sender.Start()
-	if err != nil {
-		log.Fatalf("failed to start RTP sender: %v", err)
-	}
+	errChan := make(chan error)
+	go func() {
+		err = sender.Start()
+		if err != nil {
+			errChan <- fmt.Errorf("failed to start RTP sender: %v", err)
+			return
+		}
+		close(done)
+	}()
 
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, os.Interrupt)
@@ -222,106 +266,122 @@ func send(src, proto, remote, codec, rtcc string, stream bool) {
 	select {
 	case sig := <-signals:
 		log.Printf("got signal: %v, closing sender", sig)
+
 	case <-done:
 		log.Printf("reached EOS, closing sender")
+
+	case err := <-errChan:
+		return err
 	}
-	err = sender.Close()
-	if err != nil {
-		log.Fatalf("failed to close sender %v", err)
-	}
-	err = cancel()
-	if err != nil {
-		log.Fatalf("failed to close transport %v", err)
-	}
+
+	return nil
 }
 
-func receive(dst, proto, remote, codec, rtcc string, stream bool) {
+func receive(dst, proto, remote, codec, rtcc string, stream bool) error {
 	start := time.Now()
 
 	var w rtc.RTCPWriter
 	var r io.Reader
-	var cancel func() error
+
 	switch proto {
 	case QUIC:
 
 		q, err := transport.NewQUICServer(remote)
 		if err != nil {
-			log.Fatalf("failed to open RTQ session: %v", err)
+			return fmt.Errorf("failed to open RTQ session: %v", err)
 		}
-		r, err = q.Reader(0)
+		defer closeErr(q.Close)
+
+		readCloser, err := q.Reader(0)
 		if err != nil {
-			log.Fatalf("failed to open RTQ read flow: %v", err)
+			return fmt.Errorf("failed to open RTQ read flow: %v", err)
 		}
-		w, err = q.Writer(1)
+		defer closeErr(readCloser.Close)
+		r = readCloser
+
+		writeCloser, err := q.Writer(1)
 		if err != nil {
-			log.Fatalf("failed to open RTQ write flow: %v", err)
+			return fmt.Errorf("failed to open RTQ write flow: %v", err)
 		}
-		cancel = q.Close
+		defer closeErr(writeCloser.Close)
+		w = writeCloser
 
 		if stream {
 			l, err := utils.GetStreamLogWriter()
 			if err != nil {
-				log.Fatal(err)
+				return fmt.Errorf("failed to get stream log writer: %v", err)
 			}
+			defer closeErr(l.Close)
+
 			ctx, cancelCtx := context.WithCancel(context.Background())
 			go func() {
-				receiveStreamData(ctx, q, start, l)
-				if err != nil {
-					log.Fatalf("failed to receive stream data: %v", err)
+				if err := receiveStreamData(ctx, q, start, l); err != nil {
+					log.Fatalf("failed to receive stream data: %v", err) // TODO: return error to main goroutine
 				}
 			}()
-			cancelTmp := cancel //TODO: is this necessary? (see above, too)
-			cancel = func() error {
-				cancelCtx()
-				return cancelTmp()
-			}
+			defer cancelCtx()
 		}
 
 	case UDP:
 
 		u, err := transport.NewUDPServer(remote)
 		if err != nil {
-			log.Fatalf("failed to open UDP session: %v", err)
+			return fmt.Errorf("failed to open UDP session: %v", err)
 		}
-		rr, err := u.Reader(0)
+		defer closeErr(u.Close)
+
+		readCloser, err := u.Reader(0)
 		if err != nil {
-			log.Fatalf("failed to open UDP read flow: %v", err)
+			return fmt.Errorf("failed to open UDP read flow: %v", err)
 		}
-		w, err = u.Writer(1)
+		defer closeErr(readCloser.Close)
+		r = readCloser
+
+		writeCloser, err := u.Writer(1)
 		if err != nil {
-			log.Fatalf("failed to open UDP write flow: %v", err)
+			return fmt.Errorf("failed to open UDP write flow: %v", err)
 		}
-		r = rr
-		cancel = rr.Close
+		defer closeErr(writeCloser.Close)
+		w = writeCloser
 
 	default:
-		log.Fatalf("unknown transport protocol: %v", proto)
-	}
-
-	recv, err := rtc.NewReceiver(r, w, rtc.ReceiverDst(dst), rtc.ReceiverCodec(codec))
-	if err != nil {
-		log.Fatalf("failed to create RTP receiver: %v", err)
+		return fmt.Errorf("unknown transport protocol: %v", proto)
 	}
 
 	rtpLogger, err := utils.GetRTPLogWriter()
 	if err != nil {
-		log.Fatal(err)
+		return fmt.Errorf("failed to get RTP log writer: %v", err)
 	}
-	recv.ConfigureRTPLogInterceptor(utils.NopCloser{Writer: ioutil.Discard}, rtpLogger("rtcp_out"), rtpLogger("rtp_in"), utils.NopCloser{Writer: ioutil.Discard})
+	rtcpOutLog := rtpLogger("rtcp_out")
+	rtpInLog := rtpLogger("rtp_in")
+	defer closeErr(rtcpOutLog.Close)
+	defer closeErr(rtpInLog.Close)
 
-	switch rtcc {
-	case SCREAM:
-		recv.ConfigureSCReAMInterceptor()
-	default:
-		log.Printf("unknown cc: %v\n", rtcc)
+	recv, err := rtc.NewReceiver(r, w, rtc.ReceiverDst(dst), rtc.ReceiverCodec(codec))
+	if err != nil {
+		return fmt.Errorf("failed to create RTP receiver: %v", err)
+	}
+
+	recv.ConfigureRTPLogInterceptor(ioutil.Discard, rtcpOutLog, rtpInLog, ioutil.Discard)
+
+	if rtcc == SCREAM {
+		err := recv.ConfigureSCReAMInterceptor()
+		if err != nil {
+			return fmt.Errorf("failed to configure SCReAM interceptor: %v", err)
+		}
 	}
 
 	done := make(chan struct{})
-	recv.NotifyDone(done)
-	err = recv.Receive()
-	if err != nil {
-		log.Fatalf("failed to start RTP receiver: %v", err)
-	}
+	errChan := make(chan error)
+
+	go func() {
+		err = recv.Receive()
+		if err != nil {
+			errChan <- fmt.Errorf("failed to start RTP receiver: %v", err)
+			return
+		}
+		close(done)
+	}()
 
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, os.Interrupt)
@@ -329,17 +389,15 @@ func receive(dst, proto, remote, codec, rtcc string, stream bool) {
 	select {
 	case sig := <-signals:
 		log.Printf("got signal: %v, closing receiver", sig)
-		err = recv.Close()
-		if err != nil {
-			log.Fatalf("failed to close receiver %v", err)
-		}
-		err = cancel()
-		if err != nil {
-			log.Fatalf("failed to close transport: %v", err)
-		}
+
 	case <-done:
 		log.Printf("reached EOS, closing receiver")
+
+	case err := <-errChan:
+		return err
 	}
+
+	return nil
 }
 
 type loggingStreamReader struct {
@@ -385,10 +443,12 @@ func receiveStreamData(ctx context.Context, q *transport.QUIC, start time.Time, 
 			if len(headerBytes) != 16 {
 				return fmt.Errorf("read wrong number of bytes from header, got: %v but want: %v", len(headerBytes), 16)
 			}
-			nextPacket.UnmarshalBinary(headerBytes)
+			if err := nextPacket.UnmarshalBinary(headerBytes); err != nil {
+				return err
+			}
 
 			if nextPacket.sequenceNumber != lsr.sequenceNumber {
-				log.Fatalf("received unexpected sequenceNumber, expected: %v, got %v\n", nextPacket.sequenceNumber, lsr.sequenceNumber)
+				return fmt.Errorf("received unexpected sequenceNumber, expected: %v, got %v", nextPacket.sequenceNumber, lsr.sequenceNumber)
 			}
 
 			bodyReader := io.LimitReader(&lsr, int64(nextPacket.length))
@@ -405,8 +465,9 @@ func receiveStreamData(ctx context.Context, q *transport.QUIC, start time.Time, 
 	}
 }
 
-//const streamDataPacketLength = 1484
-const streamDataPacketLength = 64_000
+const streamDataPacketLength = 1484
+
+//const streamDataPacketLength = 64_000
 
 func sendStreamData(ctx context.Context, q *transport.QUIC, start time.Time, logger io.WriteCloser) error {
 	stream, err := q.OpenUniStream()
@@ -477,11 +538,4 @@ func (p *streamDataPacket) UnmarshalBinary(data []byte) error {
 	p.length = binary.BigEndian.Uint64(data[8:16])
 	p.data = make([]byte, p.length)
 	return nil
-}
-
-func max(a, b uint64) uint64 {
-	if a > b {
-		return a
-	}
-	return b
 }

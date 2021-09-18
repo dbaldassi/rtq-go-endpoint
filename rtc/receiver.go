@@ -35,9 +35,8 @@ type Receiver struct {
 
 	pipeline *gstsink.Pipeline
 
-	packet  chan []byte
-	closeC  chan struct{}
-	notifyC chan<- struct{}
+	packet chan []byte
+	closeC chan struct{}
 }
 
 type ReceiverOption func(*Receiver) error
@@ -92,7 +91,7 @@ func (r *Receiver) ConfigureSCReAMInterceptor() error {
 	return nil
 }
 
-func (r *Receiver) ConfigureRTPLogInterceptor(rtcpIn, rtcpOut, rtpIn, rtpOut io.WriteCloser) {
+func (r *Receiver) ConfigureRTPLogInterceptor(rtcpIn, rtcpOut, rtpIn, rtpOut io.Writer) {
 	i := utils.NewRTPLogInterceptor(rtcpIn, rtcpOut, rtpIn, rtpOut)
 	r.ir.Add(i)
 }
@@ -143,31 +142,22 @@ func (r *Receiver) Receive() error {
 	r.pipeline.Start()
 	go gstsink.StartMainLoop()
 
-	go func() {
-		select {
-		case err := <-connErrC:
-			log.Printf("got error from connection reader: %v\n", err)
-			r.pipeline.Stop()
+	select {
+	case err := <-connErrC:
+		log.Printf("got error from connection reader: %v\n", err)
+		r.pipeline.Stop()
 
-		case <-r.closeC:
-			r.pipeline.Stop()
-		}
-		r.i.Close()
-		select {
-		case <-eosC:
-		case <-time.After(3 * time.Second):
-			log.Printf("timeout")
-		}
-		if r.notifyC != nil {
-			r.notifyC <- struct{}{}
-		}
-	}()
+	case <-r.closeC:
+		r.pipeline.Stop()
+	}
+	r.i.Close()
+	select {
+	case <-eosC:
+	case <-time.After(3 * time.Second):
+		log.Printf("timeout")
+	}
 
 	return nil
-}
-
-func (r *Receiver) NotifyDone(c chan<- struct{}) {
-	r.notifyC = c
 }
 
 func (r *Receiver) Close() error {

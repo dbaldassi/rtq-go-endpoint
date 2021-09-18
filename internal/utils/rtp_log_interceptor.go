@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"os"
 	"time"
 
 	"github.com/pion/interceptor"
@@ -54,10 +53,10 @@ type RTPLogInterceptor struct {
 
 	start time.Time
 
-	rtcpInStream  io.WriteCloser
-	rtcpOutStream io.WriteCloser
-	rtpInStream   io.WriteCloser
-	rtpOutStream  io.WriteCloser
+	rtcpInStream  io.Writer
+	rtcpOutStream io.Writer
+	rtpInStream   io.Writer
+	rtpOutStream  io.Writer
 
 	rtcpIn  chan *rtcpPacket
 	rtcpOut chan *rtcpPacket
@@ -68,7 +67,7 @@ type RTPLogInterceptor struct {
 	closed chan struct{}
 }
 
-func NewRTPLogInterceptor(rtcpIn, rtcpOut, rtpIn, rtpOut io.WriteCloser) *RTPLogInterceptor {
+func NewRTPLogInterceptor(rtcpIn, rtcpOut, rtpIn, rtpOut io.Writer) *RTPLogInterceptor {
 	i := &RTPLogInterceptor{
 		start: time.Now(),
 
@@ -166,19 +165,6 @@ func (r *RTPLogInterceptor) Close() error {
 		close(r.done)
 	}
 	<-r.closed
-	for _, c := range []io.Closer{
-		r.rtcpInStream,
-		r.rtcpOutStream,
-		r.rtpInStream,
-		r.rtpOutStream,
-	} {
-		if c != os.Stdout {
-			err := c.Close()
-			if err != nil {
-				return err
-			}
-		}
-	}
 	return nil
 }
 
