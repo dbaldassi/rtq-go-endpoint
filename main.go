@@ -421,7 +421,7 @@ func receiveStreamData(ctx context.Context, q *transport.QUIC, start time.Time, 
 	}
 }
 
-const streamDataPacketLength = 1400
+const streamDataPacketLength = 1200
 
 //const streamDataPacketLength = 64_000
 

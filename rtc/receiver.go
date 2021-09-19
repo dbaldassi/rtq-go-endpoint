@@ -59,7 +59,7 @@ func NewReceiver(r io.Reader, w RTCPWriter, opts ...ReceiverOption) (*Receiver, 
 	recv := &Receiver{
 		codec:    "h264",
 		dst:      "autovideosink",
-		mtu:      1400,
+		mtu:      1200,
 		rtpConn:  r,
 		rtcpConn: w,
 		streamInfo: &interceptor.StreamInfo{

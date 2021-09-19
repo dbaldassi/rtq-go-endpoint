@@ -67,7 +67,7 @@ func NewSender(w RTPWriter, r io.Reader, opts ...SenderOption) (*Sender, error) 
 	s := &Sender{
 		codec:    "h264",
 		src:      "videotestsrc",
-		mtu:      1400,
+		mtu:      1200,
 		writeRTP: defaultRTPWriterFunc(w),
 		rtcpConn: r,
 		streamInfo: &interceptor.StreamInfo{
