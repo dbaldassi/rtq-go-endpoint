@@ -70,8 +70,6 @@ func (f *fbInferer) buffer(cancel chan struct{}) {
 	for {
 		select {
 		case pkt := <-f.acked:
-			metrics := f.m.Metrics()
-			pkt.receiveTS = pkt.sentTS.Add(metrics.SmoothedRTT / 2)
 			buf = append(buf, pkt)
 
 		case <-t.C:
@@ -82,13 +80,15 @@ func (f *fbInferer) buffer(cancel chan struct{}) {
 				return buf[i].seqNr < buf[j].seqNr
 			})
 
+			metrics := f.m.Metrics()
+			var lastTS uint64
 			for _, pkt := range buf {
-				f.rx.Receive(f.ntpTime(pkt.receiveTS), pkt.ssrc, pkt.size, pkt.seqNr, 0)
+				lastTS = f.ntpTime(pkt.sentTS.Add(metrics.MinRTT / 2))
+				f.rx.Receive(lastTS, pkt.ssrc, pkt.size, pkt.seqNr, 0)
 			}
-			lastTS := buf[len(buf)-1].receiveTS
 			buf = []ackedPkt{}
 
-			if ok, fb := f.rx.CreateStandardizedFeedback(f.ntpTime(lastTS), true); ok {
+			if ok, fb := f.rx.CreateStandardizedFeedback(lastTS, true); ok {
 				f.received <- fb
 			}
 
@@ -99,7 +99,7 @@ func (f *fbInferer) buffer(cancel chan struct{}) {
 }
 
 func (f *fbInferer) rtpWriterFunc(header *rtp.Header, payload []byte, attributes interceptor.Attributes) (int, error) {
-	n := header.MarshalSize() + len(payload)
+	size := header.MarshalSize() + len(payload)
 	t := time.Now()
 	n, err := f.rtpConn.WriteRTPNotify(header, payload, func(r bool) {
 		if !r {
@@ -109,7 +109,7 @@ func (f *fbInferer) rtpWriterFunc(header *rtp.Header, payload []byte, attributes
 			f.acked <- ackedPkt{
 				sentTS: t,
 				ssrc:   header.SSRC,
-				size:   n,
+				size:   size,
 				seqNr:  header.SequenceNumber,
 			}
 		}()
