@@ -83,7 +83,12 @@ func (f *fbInferer) buffer(cancel chan struct{}) {
 			metrics := f.m.Metrics()
 			var lastTS uint64
 			for _, pkt := range buf {
-				lastTS = f.ntpTime(pkt.sentTS.Add(metrics.MinRTT / 2))
+				sent := f.ntpTime(pkt.sentTS)
+				rttNTP := metrics.SmoothedRTT.Seconds() * 65536
+				lastTS := sent + uint64(rttNTP)/2
+
+				//lastTS2 := f.ntpTime(pkt.sentTS.Add(metrics.MinRTT / 2))
+				//fmt.Printf("t=%v, t2=%v, diff=%v\n", lastTS, lastTS2, lastTS-lastTS2)
 				f.rx.Receive(lastTS, pkt.ssrc, pkt.size, pkt.seqNr, 0)
 			}
 			buf = []ackedPkt{}
