@@ -33,9 +33,10 @@ const (
 	QUIC = "quic"
 	UDP  = "udp"
 
-	NOCC         = "nocc"
-	SCREAM       = "scream"
-	SCREAM_INFER = "scream-infer"
+	NOCC           = "nocc"
+	SCREAM         = "scream"
+	SCREAM_INFER   = "scream-infer"
+	NAIVE_ADAPTION = "naive"
 )
 
 func main() {
@@ -61,7 +62,7 @@ func main() {
 		fs.StringVar(&addr, "addr", ":4242", "addr host the receiver or to connect the sender to")
 		fs.StringVar(&codec, "codec", H264, fmt.Sprintf("Video Codec, options: '%v', '%v', '%v'", H264, VP8, VP9))
 		fs.StringVar(&proto, "transport", QUIC, fmt.Sprintf("Transport to use, options: '%v', '%v'", QUIC, UDP))
-		fs.StringVar(&rtcc, "cc", NOCC, fmt.Sprintf("Real-time Congestion Controller to use, options: '%v', '%v', '%v'", NOCC, SCREAM, SCREAM_INFER))
+		fs.StringVar(&rtcc, "cc", NOCC, fmt.Sprintf("Real-time Congestion Controller to use, options: '%v', '%v', '%v', '%v'", NOCC, SCREAM, SCREAM_INFER, NAIVE_ADAPTION))
 		fs.BoolVar(&stream, "stream", false, "send data on a QUIC stream in parallel (only effective if proto=quic)")
 	}
 
@@ -243,6 +244,17 @@ func send(src, proto, remote, codec, rtcc string, stream bool) error {
 		err = sender.ConfigureInferingSCReAMInterceptor(cclog, w.(rtc.AckingRTPWriter), metricer)
 		if err != nil {
 			return fmt.Errorf("failed to configure inferring SCReAM interceptor: %v", err)
+		}
+
+	case NAIVE_ADAPTION:
+		cclog, err := utils.GetCCStatLogWriter()
+		if err != nil {
+			return fmt.Errorf("failed to get CC stats log writer: %v", err)
+		}
+		defer closeErr(cclog.Close)
+		err = sender.ConfigureNaiveBitrateAdaption(cclog)
+		if err != nil {
+			return fmt.Errorf("failed to configure naive bitrate adapter")
 		}
 
 	default:

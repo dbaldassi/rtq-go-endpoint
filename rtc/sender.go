@@ -75,7 +75,7 @@ func NewSender(w RTPWriter, r io.Reader, opts ...SenderOption) (*Sender, error) 
 		},
 		ir: interceptor.Registry{},
 
-		packet:       make(chan rtp.Packet, 1_000_000),
+		packet:       make(chan rtp.Packet),
 		feedbackErrC: make(chan error),
 		closeC:       make(chan struct{}),
 	}
@@ -126,6 +126,16 @@ func (s *Sender) inferFeedback(fbc <-chan []byte) {
 	}()
 }
 
+func (s *Sender) ConfigureNaiveBitrateAdaption(statsLogger io.Writer) error {
+	i, err := utils.NewSenderInterceptor()
+	if err != nil {
+		return err
+	}
+	s.ir.Add(i)
+	go s.runSCReAMStats(statsLogger, i)
+	return nil
+}
+
 func (s *Sender) ConfigureSCReAMInterceptor(statsLogger io.Writer) error {
 	tx := screamcgo.NewTx()
 	cc, err := scream.NewSenderInterceptor(scream.Tx(tx))
@@ -160,7 +170,12 @@ func (s *Sender) AcceptFeedback() error {
 	return nil
 }
 
-func (s *Sender) runSCReAMStats(statsLogger io.Writer, cc *scream.SenderInterceptor) {
+type congestionController interface {
+	GetTargetBitrate(ssrc uint32) (float64, error)
+	GetStatistics() string
+}
+
+func (s *Sender) runSCReAMStats(statsLogger io.Writer, cc congestionController) {
 	ticker := time.NewTicker(20 * time.Millisecond)
 	start := time.Now()
 	var lastBitrate uint
@@ -202,7 +217,10 @@ func (s *Sender) Write(p []byte) (n int, err error) {
 	if err != nil {
 		return 0, err
 	}
-	s.packet <- pkt
+	_, err = s.rtpWriter.Write(&pkt.Header, pkt.Payload, nil)
+	if err != nil {
+		return 0, err
+	}
 	return len(p), nil
 }
 
@@ -232,13 +250,13 @@ func (s *Sender) Start() error {
 	}))
 
 	errC := make(chan error)
-	iw := newInterceptorWriter(s.rtpWriter, s.packet, errC)
-	go func() {
-		err := iw.run()
-		if err != nil {
-			errC <- err
-		}
-	}()
+	//iw := newInterceptorWriter(s.rtpWriter, s.packet, errC)
+	//go func() {
+	//	err := iw.run()
+	//	if err != nil {
+	//		errC <- err
+	//	}
+	//}()
 
 	pipeline, err := gstsrc.NewPipeline(s.codec, s.src, s)
 	if err != nil {
@@ -273,7 +291,7 @@ func (s *Sender) Start() error {
 	case <-s.closeC:
 		s.pipeline.Stop()
 	}
-	iw.close()
+	//iw.close()
 	s.i.Close()
 	select {
 	case <-eosC:
@@ -292,41 +310,41 @@ func (s *Sender) Close() error {
 	return nil
 }
 
-type interceptorWriter struct {
-	w      interceptor.RTPWriter
-	packet <-chan rtp.Packet
-	done   chan struct{}
-}
-
-func newInterceptorWriter(w interceptor.RTPWriter, c <-chan rtp.Packet, errC chan<- error) *interceptorWriter {
-	return &interceptorWriter{
-		w:      w,
-		packet: c,
-		done:   make(chan struct{}),
-	}
-}
-
-func (i *interceptorWriter) run() error {
-	defer close(i.done)
-	for {
-		select {
-		case p := <-i.packet:
-			_, err := i.w.Write(&p.Header, p.Payload, nil)
-			if err != nil {
-				return err
-			}
-
-		case <-i.done:
-			return nil
-		}
-	}
-}
-
-func (i *interceptorWriter) close() {
-	select {
-	case <-i.done:
-		return
-	default:
-		i.done <- struct{}{}
-	}
-}
+//type interceptorWriter struct {
+//	w      interceptor.RTPWriter
+//	packet <-chan rtp.Packet
+//	done   chan struct{}
+//}
+//
+//func newInterceptorWriter(w interceptor.RTPWriter, c <-chan rtp.Packet, errC chan<- error) *interceptorWriter {
+//	return &interceptorWriter{
+//		w:      w,
+//		packet: c,
+//		done:   make(chan struct{}),
+//	}
+//}
+//
+//func (i *interceptorWriter) run() error {
+//	defer close(i.done)
+//	for {
+//		select {
+//		case p := <-i.packet:
+//			_, err := i.w.Write(&p.Header, p.Payload, nil)
+//			if err != nil {
+//				return err
+//			}
+//
+//		case <-i.done:
+//			return nil
+//		}
+//	}
+//}
+//
+//func (i *interceptorWriter) close() {
+//	select {
+//	case <-i.done:
+//		return
+//	default:
+//		i.done <- struct{}{}
+//	}
+//}
