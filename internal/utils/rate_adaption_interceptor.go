@@ -138,8 +138,12 @@ func (s *SenderInterceptor) loop(writer interceptor.RTPWriter, ssrc uint32) {
 	s.streamsMu.Unlock()
 
 	lastQueueSize := 0
-	decreasing := 0
-	increasing := 0
+
+	queueGrowing := 0
+	queueShrinking := 0
+
+	var lastDecrease time.Time
+	var lastIncrease time.Time
 
 	for {
 		select {
@@ -149,24 +153,27 @@ func (s *SenderInterceptor) loop(writer interceptor.RTPWriter, ssrc uint32) {
 				s.log.Warnf("failed sending RTP packet: %v", err)
 			}
 
-			if nextQueueSize == 0 {
+			if nextQueueSize == 0 && time.Since(lastIncrease) > 500*time.Millisecond {
 				stream.targetBitrate.increase()
-				decreasing = 0
-				increasing = 0
+				queueGrowing = 0
+				queueShrinking = 0
+				lastIncrease = time.Now()
 			}
 
-			if nextQueueSize > lastQueueSize {
-				increasing++
-				decreasing = 0
-				if increasing > 30 {
+			if nextQueueSize > lastQueueSize || nextQueueSize > 200 {
+				queueGrowing++
+				if queueGrowing > 50 && time.Since(lastDecrease) > 50*time.Millisecond {
 					stream.targetBitrate.decrease()
+					lastDecrease = time.Now()
+					queueGrowing = 0
 				}
 			}
 
-			if nextQueueSize < lastQueueSize && decreasing > 30 {
-				decreasing++
-				if decreasing > 30 {
+			if nextQueueSize < 100 && nextQueueSize < lastQueueSize {
+				queueShrinking++
+				if queueShrinking > 100 && time.Since(lastIncrease) > 500*time.Millisecond {
 					stream.targetBitrate.increase()
+					queueShrinking = 0
 				}
 			}
 			lastQueueSize = nextQueueSize
