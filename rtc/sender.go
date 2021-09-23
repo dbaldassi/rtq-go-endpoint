@@ -75,7 +75,6 @@ func NewSender(w RTPWriter, r io.Reader, opts ...SenderOption) (*Sender, error) 
 		},
 		ir: interceptor.Registry{},
 
-		packet:       make(chan rtp.Packet),
 		feedbackErrC: make(chan error),
 		closeC:       make(chan struct{}),
 	}
@@ -250,13 +249,6 @@ func (s *Sender) Start() error {
 	}))
 
 	errC := make(chan error)
-	//iw := newInterceptorWriter(s.rtpWriter, s.packet, errC)
-	//go func() {
-	//	err := iw.run()
-	//	if err != nil {
-	//		errC <- err
-	//	}
-	//}()
 
 	pipeline, err := gstsrc.NewPipeline(s.codec, s.src, s)
 	if err != nil {
@@ -266,7 +258,6 @@ func (s *Sender) Start() error {
 
 	eosC := make(chan struct{})
 	gstsrc.HandleSrcEOS(func() {
-		close(s.packet)
 		close(eosC)
 	})
 
@@ -280,10 +271,6 @@ func (s *Sender) Start() error {
 		log.Println("eos")
 	case err := <-errC:
 		log.Printf("got error from interceptorWriter: %v\n", err)
-		go func() {
-			for range s.packet {
-			}
-		}()
 		s.pipeline.Stop()
 	case err := <-s.feedbackErrC:
 		log.Printf("got error from feedback Acceptor: %v\n", err)
@@ -291,15 +278,11 @@ func (s *Sender) Start() error {
 	case <-s.closeC:
 		s.pipeline.Stop()
 	}
-	//iw.close()
 	s.i.Close()
 	select {
 	case <-eosC:
 	case <-time.After(3 * time.Second):
 		log.Printf("timeout")
-	}
-	if s.notifyC != nil {
-		s.notifyC <- struct{}{}
 	}
 
 	return nil
@@ -309,42 +292,3 @@ func (s *Sender) Close() error {
 	close(s.closeC)
 	return nil
 }
-
-//type interceptorWriter struct {
-//	w      interceptor.RTPWriter
-//	packet <-chan rtp.Packet
-//	done   chan struct{}
-//}
-//
-//func newInterceptorWriter(w interceptor.RTPWriter, c <-chan rtp.Packet, errC chan<- error) *interceptorWriter {
-//	return &interceptorWriter{
-//		w:      w,
-//		packet: c,
-//		done:   make(chan struct{}),
-//	}
-//}
-//
-//func (i *interceptorWriter) run() error {
-//	defer close(i.done)
-//	for {
-//		select {
-//		case p := <-i.packet:
-//			_, err := i.w.Write(&p.Header, p.Payload, nil)
-//			if err != nil {
-//				return err
-//			}
-//
-//		case <-i.done:
-//			return nil
-//		}
-//	}
-//}
-//
-//func (i *interceptorWriter) close() {
-//	select {
-//	case <-i.done:
-//		return
-//	default:
-//		i.done <- struct{}{}
-//	}
-//}
