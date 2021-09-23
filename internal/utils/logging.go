@@ -39,12 +39,13 @@ func (h bufferedWriteCloser) Close() error {
 	return h.Closer.Close()
 }
 
-func getFileLogWriter(path string) (*bufferedWriteCloser, error) {
+func getFileLogWriter(path string) (io.WriteCloser, error) {
 	logfile, err := os.Create(path)
 	if err != nil {
 		return nil, err
 	}
-	return newBufferedWriteCloser(bufio.NewWriter(logfile), logfile), nil
+	return logfile, nil
+	//return newBufferedWriteCloser(bufio.NewWriter(logfile), logfile), nil
 }
 
 func GetMainLogWriter() (io.WriteCloser, error) {
