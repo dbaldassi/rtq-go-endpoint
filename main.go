@@ -215,8 +215,6 @@ func send(src, proto, remote, codec, rtcc string, stream bool) error {
 	}
 	defer closeErr(sender.Close)
 
-	sender.ConfigureRTPLogInterceptor(rtcpInLog, ioutil.Discard, ioutil.Discard, rtpOutLog)
-
 	switch rtcc {
 	case SCREAM:
 		cclog, err := utils.GetCCStatLogWriter()
@@ -260,6 +258,8 @@ func send(src, proto, remote, codec, rtcc string, stream bool) error {
 	default:
 		log.Printf("unknown cc: %v\n", rtcc)
 	}
+
+	sender.ConfigureRTPLogInterceptor(rtcpInLog, ioutil.Discard, ioutil.Discard, rtpOutLog)
 
 	done := make(chan struct{})
 	errChan := make(chan error)
@@ -374,14 +374,14 @@ func receive(dst, proto, remote, codec, rtcc string, stream bool) error {
 		return fmt.Errorf("failed to create RTP receiver: %v", err)
 	}
 
-	recv.ConfigureRTPLogInterceptor(ioutil.Discard, rtcpOutLog, rtpInLog, ioutil.Discard)
-
 	if rtcc == SCREAM {
 		err := recv.ConfigureSCReAMInterceptor()
 		if err != nil {
 			return fmt.Errorf("failed to configure SCReAM interceptor: %v", err)
 		}
 	}
+
+	recv.ConfigureRTPLogInterceptor(ioutil.Discard, rtcpOutLog, rtpInLog, ioutil.Discard)
 
 	done := make(chan struct{})
 	errChan := make(chan error)
