@@ -12,7 +12,7 @@ import (
 	"unsafe"
 )
 
-var UnknownCodecError = errors.New("unknown codec")
+var ErrUnknownCodec = errors.New("unknown codec")
 
 // StartMainLoop starts GLib's main loop
 // It needs to be called from the process' main thread
@@ -38,10 +38,10 @@ func NewPipeline(codecName, dst string) (*Pipeline, error) {
 		pipelineStr += ", encoding-name=VP9-DRAFT-IETF-01 ! rtpjitterbuffer ! queue ! rtpvp9depay ! decodebin ! " + dst
 
 	case "h264":
-		pipelineStr += " ! rtpjitterbuffer ! queue ! rtph264depay ! h264parse ! avdec_h264 ! " + dst
+		pipelineStr += " ! rtpjitterbuffer ! queue ! rtph264depay ! decodebin ! " + dst
 
 	default:
-		return nil, UnknownCodecError
+		return nil, ErrUnknownCodec
 	}
 
 	pipelineStrUnsafe := C.CString(pipelineStr)

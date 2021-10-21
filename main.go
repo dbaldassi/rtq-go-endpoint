@@ -77,7 +77,7 @@ func main() {
 		}
 		files := sendCmd.Args()
 		log.Printf("src files: %v\n", files)
-		src := "videotestsrc"
+		src := "videotestsrc ! video/x-raw,format=I420"
 		if len(files) > 0 {
 			src = fmt.Sprintf("filesrc location=%v ! queue ! decodebin ! videoconvert ", files[0])
 		}
