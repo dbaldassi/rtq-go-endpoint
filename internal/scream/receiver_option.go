@@ -1,5 +1,3 @@
-//+build scream
-
 package scream
 
 import "time"
