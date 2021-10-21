@@ -41,10 +41,8 @@ type Sender struct {
 
 	pipeline *gstsrc.Pipeline
 
-	packet       chan rtp.Packet
 	closeC       chan struct{}
 	feedbackErrC chan error
-	notifyC      chan<- struct{}
 }
 
 type SenderOption func(*Sender) error

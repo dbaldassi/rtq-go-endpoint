@@ -1,7 +1,6 @@
 package utils
 
 import (
-	"bufio"
 	"fmt"
 	"io"
 	"log"
@@ -17,26 +16,6 @@ type NopCloser struct {
 
 func (c NopCloser) Close() error {
 	return nil
-}
-
-type bufferedWriteCloser struct {
-	*bufio.Writer
-	io.Closer
-}
-
-// NewBufferedWriteCloser creates an io.WriteCloser from a bufio.Writer and an io.Closer
-func newBufferedWriteCloser(writer *bufio.Writer, closer io.Closer) *bufferedWriteCloser {
-	return &bufferedWriteCloser{
-		Writer: writer,
-		Closer: closer,
-	}
-}
-
-func (h bufferedWriteCloser) Close() error {
-	if err := h.Writer.Flush(); err != nil {
-		return err
-	}
-	return h.Closer.Close()
 }
 
 func getFileLogWriter(path string) (io.WriteCloser, error) {

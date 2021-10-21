@@ -53,11 +53,10 @@ func newFBInferer(w AckingRTPWriter, rx *screamcgo.Rx, received chan []byte, m M
 }
 
 type ackedPkt struct {
-	sentTS    time.Time
-	receiveTS time.Time
-	ssrc      uint32
-	size      int
-	seqNr     uint16
+	sentTS time.Time
+	ssrc   uint32
+	size   int
+	seqNr  uint16
 }
 
 func (f *fbInferer) ntpTime(t time.Time) uint64 {

@@ -1,9 +1,7 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"encoding/binary"
 	"flag"
 	"fmt"
 	"io"
@@ -217,8 +215,8 @@ func send(src, proto, remote, codec, rtcc string, stream bool) error {
 
 	switch rtcc {
 	case SCREAM:
-		cclog, err := utils.GetCCStatLogWriter()
-		if err != nil {
+		var cclog io.WriteCloser
+		if cclog, err = utils.GetCCStatLogWriter(); err != nil {
 			return fmt.Errorf("failed to get CC stats log writer: %v", err)
 		}
 		defer closeErr(cclog.Close)
@@ -233,8 +231,8 @@ func send(src, proto, remote, codec, rtcc string, stream bool) error {
 		}
 
 	case SCREAM_INFER:
-		cclog, err := utils.GetCCStatLogWriter()
-		if err != nil {
+		var cclog io.WriteCloser
+		if cclog, err = utils.GetCCStatLogWriter(); err != nil {
 			return fmt.Errorf("failed to get CC stats log writer: %v", err)
 		}
 		defer closeErr(cclog.Close)
@@ -245,8 +243,8 @@ func send(src, proto, remote, codec, rtcc string, stream bool) error {
 		}
 
 	case NAIVE_ADAPTION:
-		cclog, err := utils.GetCCStatLogWriter()
-		if err != nil {
+		var cclog io.WriteCloser
+		if cclog, err = utils.GetCCStatLogWriter(); err != nil {
 			return fmt.Errorf("failed to get CC stats log writer: %v", err)
 		}
 		defer closeErr(cclog.Close)
@@ -375,8 +373,7 @@ func receive(dst, proto, remote, codec, rtcc string, stream bool) error {
 	}
 
 	if rtcc == SCREAM {
-		err := recv.ConfigureSCReAMInterceptor()
-		if err != nil {
+		if err = recv.ConfigureSCReAMInterceptor(); err != nil {
 			return fmt.Errorf("failed to configure SCReAM interceptor: %v", err)
 		}
 	}
@@ -463,37 +460,4 @@ func sendStreamData(ctx context.Context, q *transport.QUIC, start time.Time, log
 			fmt.Fprintf(logger, "%v, %v\n", time.Since(start).Milliseconds(), n)
 		}
 	}
-}
-
-type streamDataPacket struct {
-	sequenceNumber uint64
-	length         uint64 // length of following data in bytes
-	data           []byte
-}
-
-func (p *streamDataPacket) MarshalBinary() ([]byte, error) {
-	buf := new(bytes.Buffer)
-	err := binary.Write(buf, binary.BigEndian, p.sequenceNumber)
-	if err != nil {
-		return nil, err
-	}
-	err = binary.Write(buf, binary.BigEndian, uint64(len(p.data)))
-	if err != nil {
-		return nil, err
-	}
-	_, err = buf.Write(p.data)
-	if err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
-}
-
-func (p *streamDataPacket) UnmarshalBinary(data []byte) error {
-	if len(data) < 16 {
-		return fmt.Errorf("protocol packet too short: got %v bytes, expected at least 8 bytes", len(data))
-	}
-	p.sequenceNumber = binary.BigEndian.Uint64(data[0:8])
-	p.length = binary.BigEndian.Uint64(data[8:16])
-	p.data = make([]byte, p.length)
-	return nil
 }
