@@ -240,13 +240,12 @@ func (s *SenderInterceptor) loop(writer interceptor.RTPWriter, ssrc uint32) {
 			if packet == nil {
 				continue
 			}
-			t := s.getTimeNTP(time.Now())
 			// TODO: Forward attributes from above?
 			if _, err := writer.Write(&packet.Header, packet.Payload, interceptor.Attributes{}); err != nil {
 				s.log.Warnf("failed sending RTP packet: %+v", err)
 			}
 			s.m.Lock()
-			transmit = s.tx.AddTransmitted(t, ssrc, packet.MarshalSize(), packet.SequenceNumber, packet.Marker)
+			transmit = s.tx.AddTransmitted(s.getTimeNTP(time.Now()), ssrc, packet.MarshalSize(), packet.SequenceNumber, packet.Marker)
 			s.m.Unlock()
 			if transmit == -1 {
 				continue
