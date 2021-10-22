@@ -30,8 +30,7 @@ type Receiver struct {
 	ir         interceptor.Registry
 	i          interceptor.Interceptor
 
-	rtpReader  interceptor.RTCPReader
-	rtcpWriter interceptor.RTCPWriter
+	rtpReader interceptor.RTCPReader
 
 	pipeline *gstsink.Pipeline
 
@@ -111,12 +110,12 @@ func (r *Receiver) Receive() error {
 		close(eosC)
 	})
 
-	r.rtpReader = r.i.BindRemoteStream(r.streamInfo, interceptor.RTCPReaderFunc(func(in []byte, attributes interceptor.Attributes) (int, interceptor.Attributes, error) {
+	r.rtpReader = r.i.BindRemoteStream(r.streamInfo, interceptor.RTCPReaderFunc(func(in []byte, _ interceptor.Attributes) (int, interceptor.Attributes, error) {
 		r.pipeline.Push(in)
 		return len(in), nil, nil
 	}))
 
-	r.rtcpWriter = r.i.BindRTCPWriter(interceptor.RTCPWriterFunc(func(pkts []rtcp.Packet, attributes interceptor.Attributes) (int, error) {
+	_ = r.i.BindRTCPWriter(interceptor.RTCPWriterFunc(func(pkts []rtcp.Packet, attributes interceptor.Attributes) (int, error) {
 		return r.rtcpConn.WriteRTCP(pkts)
 	}))
 

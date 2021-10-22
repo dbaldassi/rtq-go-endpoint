@@ -60,7 +60,7 @@ func GetQLOGWriter() (func(perspective logging.Perspective, connID []byte) io.Wr
 	_, err := os.Stat(qlogDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			if err := os.MkdirAll(qlogDir, 0o666); err != nil {
+			if err = os.MkdirAll(qlogDir, 0o666); err != nil {
 				return nil, fmt.Errorf("failed to create qlog dir %s: %v", qlogDir, err)
 			}
 		} else {
@@ -89,7 +89,7 @@ func GetRTPLogWriter() (func(string) io.WriteCloser, error) {
 	_, err := os.Stat(rtpLogDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			if err := os.MkdirAll(rtpLogDir, os.ModePerm); err != nil {
+			if err = os.MkdirAll(rtpLogDir, os.ModePerm); err != nil {
 				return nil, fmt.Errorf("failed to create qlog dir %s: %v", rtpLogDir, err)
 			}
 		} else {

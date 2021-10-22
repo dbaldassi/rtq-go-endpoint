@@ -372,13 +372,13 @@ func receive(dst, proto, remote, codec, rtcc string, stream bool) error {
 		return fmt.Errorf("failed to create RTP receiver: %v", err)
 	}
 
+	recv.ConfigureRTPLogInterceptor(ioutil.Discard, rtcpOutLog, rtpInLog, ioutil.Discard)
+
 	if rtcc == SCREAM {
 		if err = recv.ConfigureSCReAMInterceptor(); err != nil {
 			return fmt.Errorf("failed to configure SCReAM interceptor: %v", err)
 		}
 	}
-
-	recv.ConfigureRTPLogInterceptor(ioutil.Discard, rtcpOutLog, rtpInLog, ioutil.Discard)
 
 	done := make(chan struct{})
 	errChan := make(chan error)
