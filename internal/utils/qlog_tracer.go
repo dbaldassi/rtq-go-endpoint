@@ -15,12 +15,14 @@ type RTTTracer struct {
 	MinRTT      time.Duration
 	SmoothedRTT time.Duration
 	RTTVar      time.Duration
+	LatestRTT   time.Duration
 }
 
 type RTTStats struct {
 	MinRTT      time.Duration
 	SmoothedRTT time.Duration
 	RTTVar      time.Duration
+	LatestRTT   time.Duration
 }
 
 func (q *RTTTracer) Metrics() RTTStats {
@@ -30,6 +32,7 @@ func (q *RTTTracer) Metrics() RTTStats {
 		MinRTT:      q.MinRTT,
 		SmoothedRTT: q.SmoothedRTT,
 		RTTVar:      q.RTTVar,
+		LatestRTT:   q.LatestRTT,
 	}
 }
 
@@ -49,6 +52,12 @@ func (q *RTTTracer) updateRTTVar(rttvar time.Duration) {
 	q.lock.Lock()
 	defer q.lock.Unlock()
 	q.RTTVar = rttvar
+}
+
+func (q *RTTTracer) updateLatestRTT(rttvar time.Duration) {
+	q.lock.Lock()
+	defer q.lock.Unlock()
+	q.LatestRTT = rttvar
 }
 
 func NewTracer() *RTTTracer {
@@ -111,6 +120,7 @@ func (c *ConnectionRTTTracer) UpdatedMetrics(rttStats *logging.RTTStats, cwnd, b
 	min := rttStats.MinRTT()
 	smoothed := rttStats.SmoothedRTT()
 	rttVar := rttStats.MeanDeviation()
+	latestRTT := rttStats.LatestRTT()
 	if min != 0 {
 		c.t.updateMinRTT(min)
 	}
@@ -119,6 +129,9 @@ func (c *ConnectionRTTTracer) UpdatedMetrics(rttStats *logging.RTTStats, cwnd, b
 	}
 	if rttVar != 0 {
 		c.t.updateRTTVar(rttVar)
+	}
+	if latestRTT != 0 {
+		c.t.updateLatestRTT(latestRTT)
 	}
 }
 

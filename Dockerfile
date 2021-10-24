@@ -25,7 +25,7 @@ RUN go mod download
 
 COPY . .
 
-RUN go build -tags scream -o /out/rtq main.go
+RUN go build -o /out/rtq main.go
 
 FROM ubuntu:20.04
 
