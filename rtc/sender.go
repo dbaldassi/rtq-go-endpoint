@@ -85,11 +85,11 @@ func NewSender(w RTPWriter, r io.Reader, opts ...SenderOption) (*Sender, error) 
 	return s, nil
 }
 
-func (s *Sender) ConfigureInferingSCReAMInterceptor(statsLogger io.Writer, w AckingRTPWriter, m Metricer) error {
+func (s *Sender) ConfigureInferingSCReAMInterceptor(statsLogger io.Writer, w AckingRTPWriter, m Metricer, inferFromSmoothedRTT bool) error {
 	fbc := make(chan []byte, 1_000_000)
 	s.inferFeedback(fbc)
 
-	fbi := newFBInferer(w, screamcgo.NewRx(0), fbc, m)
+	fbi := newFBInferer(w, screamcgo.NewRx(0), fbc, m, inferFromSmoothedRTT)
 	s.writeRTP = fbi.rtpWriterFunc
 	go fbi.buffer(s.closeC)
 

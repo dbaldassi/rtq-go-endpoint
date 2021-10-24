@@ -33,22 +33,24 @@ type Metricer interface {
 }
 
 type fbInferer struct {
-	rtpConn  AckingRTPWriter
-	rx       *screamcgo.Rx
-	received chan []byte
-	acked    chan ackedPkt
-	t0       float64
-	m        Metricer
+	rtpConn              AckingRTPWriter
+	rx                   *screamcgo.Rx
+	received             chan []byte
+	acked                chan ackedPkt
+	t0                   float64
+	m                    Metricer
+	inferFromSmoothedRTT bool
 }
 
-func newFBInferer(w AckingRTPWriter, rx *screamcgo.Rx, received chan []byte, m Metricer) *fbInferer {
+func newFBInferer(w AckingRTPWriter, rx *screamcgo.Rx, received chan []byte, m Metricer, inferFromSmoothedRTT bool) *fbInferer {
 	return &fbInferer{
-		rtpConn:  w,
-		rx:       rx,
-		received: received,
-		acked:    make(chan ackedPkt, 1000),
-		t0:       getNTPT0(),
-		m:        m,
+		rtpConn:              w,
+		rx:                   rx,
+		received:             received,
+		acked:                make(chan ackedPkt, 1000),
+		t0:                   getNTPT0(),
+		m:                    m,
+		inferFromSmoothedRTT: inferFromSmoothedRTT,
 	}
 }
 
@@ -83,7 +85,13 @@ func (f *fbInferer) buffer(cancel chan struct{}) {
 			var lastTS uint64
 			for _, pkt := range buf {
 				sent := f.ntpTime(pkt.sentTS)
-				rttNTP := metrics.LatestRTT.Seconds() * 65536
+
+				var rttNTP float64
+				if f.inferFromSmoothedRTT {
+					rttNTP = metrics.SmoothedRTT.Seconds() * 65536
+				} else {
+					rttNTP = metrics.LatestRTT.Seconds() * 65536
+				}
 				lastTS = sent + uint64(rttNTP)/2
 
 				//lastTS2 := f.ntpTime(pkt.sentTS.Add(metrics.MinRTT / 2))

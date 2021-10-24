@@ -50,11 +50,12 @@ func main() {
 	receiveCmd := flag.NewFlagSet("receive", flag.ExitOnError)
 
 	var (
-		addr   string
-		codec  string
-		proto  string
-		rtcc   string
-		stream bool
+		addr                 string
+		codec                string
+		proto                string
+		rtcc                 string
+		stream               bool
+		inferFromSmoothedRTT bool
 	)
 	for _, fs := range []*flag.FlagSet{sendCmd, receiveCmd} {
 		fs.StringVar(&addr, "addr", ":4242", "addr host the receiver or to connect the sender to")
@@ -62,6 +63,7 @@ func main() {
 		fs.StringVar(&proto, "transport", QUIC, fmt.Sprintf("Transport to use, options: '%v', '%v'", QUIC, UDP))
 		fs.StringVar(&rtcc, "cc", NOCC, fmt.Sprintf("Real-time Congestion Controller to use, options: '%v', '%v', '%v', '%v'", NOCC, SCREAM, SCREAM_INFER, NAIVE_ADAPTION))
 		fs.BoolVar(&stream, "stream", false, "send data on a QUIC stream in parallel (only effective if proto=quic)")
+		fs.BoolVar(&inferFromSmoothedRTT, "infer-smoothed", false, "infer feedback using smoothed RTT instead of latest RTT sample")
 	}
 
 	log.Println(os.Args)
@@ -81,7 +83,7 @@ func main() {
 		if len(files) > 0 {
 			src = fmt.Sprintf("filesrc location=%v ! queue ! decodebin ! videoconvert ", files[0])
 		}
-		if err := send(src, proto, addr, codec, rtcc, stream); err != nil {
+		if err := send(src, proto, addr, codec, rtcc, stream, inferFromSmoothedRTT); err != nil {
 			log.Fatal(err)
 		}
 	case "receive":
@@ -110,7 +112,7 @@ func closeErr(closeFn func() error) {
 	}
 }
 
-func send(src, proto, remote, codec, rtcc string, stream bool) error {
+func send(src, proto, remote, codec, rtcc string, stream, inferFromSmoothedRTT bool) error {
 	start := time.Now()
 
 	var w rtc.RTPWriter
@@ -237,7 +239,7 @@ func send(src, proto, remote, codec, rtcc string, stream bool) error {
 		}
 		defer closeErr(cclog.Close)
 
-		err = sender.ConfigureInferingSCReAMInterceptor(cclog, w.(rtc.AckingRTPWriter), metricer)
+		err = sender.ConfigureInferingSCReAMInterceptor(cclog, w.(rtc.AckingRTPWriter), metricer, inferFromSmoothedRTT)
 		if err != nil {
 			return fmt.Errorf("failed to configure inferring SCReAM interceptor: %v", err)
 		}
