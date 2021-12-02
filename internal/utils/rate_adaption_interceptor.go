@@ -53,6 +53,35 @@ type localStream struct {
 	targetBitrate bitrateConfig
 }
 
+type SenderInterceptorFactory struct {
+	interceptor *SenderInterceptor
+}
+
+func NewSenderInterceptor() *SenderInterceptorFactory {
+	return &SenderInterceptorFactory{
+		interceptor: &SenderInterceptor{
+			NoOp:      interceptor.NoOp{},
+			close:     make(chan struct{}),
+			wg:        sync.WaitGroup{},
+			log:       logging.NewDefaultLoggerFactory().NewLogger("naive_adaptive_sender"),
+			streamsMu: sync.Mutex{},
+			streams:   map[uint32]*localStream{},
+		},
+	}
+}
+
+func (f *SenderInterceptorFactory) NewInterceptor(is string) (interceptor.Interceptor, error) {
+	return f.interceptor, nil
+}
+
+func (f *SenderInterceptorFactory) GetTargetBitrate(_ string, ssrc uint32) (int, error) {
+	return f.interceptor.GetTargetBitrate(ssrc)
+}
+
+func (f *SenderInterceptorFactory) GetStatistics(string) string {
+	return f.interceptor.GetStatistics()
+}
+
 type SenderInterceptor struct {
 	interceptor.NoOp
 
@@ -62,14 +91,6 @@ type SenderInterceptor struct {
 	log       logging.LeveledLogger // TODO: Replace logger?
 	streamsMu sync.Mutex
 	streams   map[uint32]*localStream
-}
-
-func NewSenderInterceptor() (*SenderInterceptor, error) {
-	return &SenderInterceptor{
-		close:   make(chan struct{}),
-		log:     logging.NewDefaultLoggerFactory().NewLogger("naive_adaptive_sender"),
-		streams: make(map[uint32]*localStream),
-	}, nil
 }
 
 func (s *SenderInterceptor) initialTargetBitrate() bitrateConfig {
@@ -95,7 +116,7 @@ func (s *SenderInterceptor) BindLocalStream(info *interceptor.StreamInfo, writer
 
 	go s.loop(writer, info.SSRC)
 
-	return interceptor.RTPWriterFunc(func(header *rtp.Header, payload []byte, attributes interceptor.Attributes) (int, error) {
+	return interceptor.RTPWriterFunc(func(header *rtp.Header, payload []byte, _ interceptor.Attributes) (int, error) {
 		pkt := &rtp.Packet{Header: *header, Payload: payload}
 		ls.queue <- pkt
 		return pkt.MarshalSize(), nil
@@ -184,7 +205,7 @@ func (s *SenderInterceptor) loop(writer interceptor.RTPWriter, ssrc uint32) {
 	}
 }
 
-func (s *SenderInterceptor) GetTargetBitrate(ssrc uint32) (float64, error) {
+func (s *SenderInterceptor) GetTargetBitrate(ssrc uint32) (int, error) {
 	s.streamsMu.Lock()
 	defer s.streamsMu.Unlock()
 
@@ -192,7 +213,7 @@ func (s *SenderInterceptor) GetTargetBitrate(ssrc uint32) (float64, error) {
 	if !ok {
 		return 0, fmt.Errorf("unknown SSRC")
 	}
-	return float64(ls.targetBitrate.target()), nil
+	return ls.targetBitrate.target(), nil
 }
 
 func (s *SenderInterceptor) GetStatistics() string {

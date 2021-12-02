@@ -1,17 +1,17 @@
 #!/bin/bash
-set -e
 
 # Set up the routing needed for the simulation.
-#/setup.sh
+/setup.sh
 
-mkdir -p /logs/qlog
+export RTPLOGDIR=/log
+export CCLOGFILE=/log/cc.log
+export QLOGDIR=/log
+export STREAMLOGFILE=/log/stream.log
 
 if [ "$ROLE" == "sender" ]; then
-    # Wait for the simulator to start up.
-    #/wait-for-it.sh sim:57832 -s -t 10
     echo "Starting RTQ sender..."
-    QUIC_GO_LOG_LEVEL=error ./rtq send -addr $RECEIVER $SENDER_PARAMS $VIDEOS
+    QUIC_GO_LOG_LEVEL=error ./rtq send -addr $RECEIVER:4242 $ARGS /input/input.y4m
 else
     echo "Running RTQ receiver."
-    QUIC_GO_LOG_LEVEL=error ./rtq receive $RECEIVER_PARAMS $DESTINATION
+    QUIC_GO_LOG_LEVEL=error ./rtq receive $ARGS /output/out.y4m
 fi

@@ -8,11 +8,15 @@ import (
 	"time"
 
 	gstsrc "github.com/mengelbart/rtq-go-endpoint/internal/gstreamer-src"
-	"github.com/mengelbart/rtq-go-endpoint/internal/scream"
 	"github.com/mengelbart/rtq-go-endpoint/internal/utils"
 	screamcgo "github.com/mengelbart/scream-go"
+	"github.com/mengelbart/syncodec"
 	"github.com/pion/interceptor"
+	"github.com/pion/interceptor/pkg/packetdump"
+	"github.com/pion/interceptor/pkg/scream"
 	"github.com/pion/rtp"
+	"github.com/pion/rtp/codecs"
+	"github.com/pion/webrtc/v3/pkg/media"
 )
 
 type RTPWriter interface {
@@ -27,6 +31,9 @@ type Sender struct {
 	codec string
 	src   string
 	mtu   int
+
+	packetizer rtp.Packetizer
+	encoder    syncodec.Codec
 
 	writeRTP interceptor.RTPWriterFunc
 
@@ -124,10 +131,7 @@ func (s *Sender) inferFeedback(fbc <-chan []byte) {
 }
 
 func (s *Sender) ConfigureNaiveBitrateAdaption(statsLogger io.Writer) error {
-	i, err := utils.NewSenderInterceptor()
-	if err != nil {
-		return err
-	}
+	i := utils.NewSenderInterceptor()
 	s.ir.Add(i)
 	go s.runSCReAMStats(statsLogger, i)
 	return nil
@@ -168,34 +172,37 @@ func (s *Sender) AcceptFeedback() error {
 }
 
 type congestionController interface {
-	GetTargetBitrate(ssrc uint32) (float64, error)
-	GetStatistics() string
+	GetTargetBitrate(session string, ssrc uint32) (int, error)
+	GetStatistics(session string) string
 }
 
 func (s *Sender) runSCReAMStats(statsLogger io.Writer, cc congestionController) {
 	ticker := time.NewTicker(20 * time.Millisecond)
-	start := time.Now()
 	var lastBitrate uint
 	for {
 		select {
 		case <-ticker.C:
-			bps, err := cc.GetTargetBitrate(0)
+			bps, err := cc.GetTargetBitrate("", 0)
 			if err != nil {
 				log.Printf("failed to get target bitrate: %v\n", err)
 			}
-			t := time.Since(start).Milliseconds()
+			t := time.Now().UnixMilli()
 			if bps > 0 && s.pipeline != nil && lastBitrate != uint(bps) {
 				lastBitrate = uint(bps)
 				s.pipeline.SetBitRate(lastBitrate)
+			}
+			if bps > 0 && s.encoder != nil && lastBitrate != uint(bps) {
+				lastBitrate = uint(bps)
+				s.encoder.SetTargetBitrate(int(lastBitrate))
 			}
 			if statsLogger != nil {
 				// queueDelay, queueDelayMax, queueDelayMinAvg, sRtt, cwnd,
 				// bytesInFlight, rateTransmitted, isInFastStart,
 				// rtpQueueDelay, targetBitrate, rateRtp, rateTransmitted,
 				// rateAcked, rateLost, rateCe, hiSeqAck
-				stats := cc.GetStatistics()
+				stats := cc.GetStatistics("")
 				// time, bitrate, stats
-				fmt.Fprintf(statsLogger, "%v, %v,\t%v\n", t, lastBitrate/1000, stats)
+				fmt.Fprintf(statsLogger, "%v, %v,\t%v\n", t, lastBitrate, stats)
 			}
 		case <-s.closeC:
 			return
@@ -203,9 +210,25 @@ func (s *Sender) runSCReAMStats(statsLogger io.Writer, cc congestionController) 
 	}
 }
 
-func (s *Sender) ConfigureRTPLogInterceptor(rtcpIn, rtcpOut, rtpIn, rtpOut io.Writer) {
-	i := utils.NewRTPLogInterceptor(rtcpIn, rtcpOut, rtpIn, rtpOut)
-	s.ir.Add(i)
+func (s *Sender) ConfigureRTPLogInterceptor(rtcpWriter, rtpWriter io.Writer, rtpFormat packetdump.RTPFormatCallback, rtcpFormat packetdump.RTCPFormatCallback) error {
+	rtpDumperInterceptor, err := packetdump.NewSenderInterceptor(
+		packetdump.RTPFormatter(rtpFormat),
+		packetdump.RTPWriter(rtpWriter),
+	)
+	if err != nil {
+		return err
+	}
+	rtcpDumperInterceptor, err := packetdump.NewReceiverInterceptor(
+		packetdump.RTCPFormatter(rtcpFormat),
+		packetdump.RTCPWriter(rtcpWriter),
+	)
+	if err != nil {
+		return err
+	}
+
+	s.ir.Add(rtpDumperInterceptor)
+	s.ir.Add(rtcpDumperInterceptor)
+	return nil
 }
 
 func (s *Sender) Write(p []byte) (n int, err error) {
@@ -219,6 +242,21 @@ func (s *Sender) Write(p []byte) (n int, err error) {
 		return 0, err
 	}
 	return len(p), nil
+}
+
+func (s *Sender) WriteFrame(frame syncodec.Frame) {
+	sample := media.Sample{
+		Data:               frame.Content,
+		Timestamp:          time.Time{},
+		Duration:           frame.Duration,
+		PacketTimestamp:    0,
+		PrevDroppedPackets: 0,
+	}
+	samples := uint32(sample.Duration.Seconds() * 90000)
+	packets := s.packetizer.Packetize(sample.Data, samples)
+	for _, p := range packets {
+		s.rtpWriter.Write(&p.Header, p.Payload, nil)
+	}
 }
 
 func defaultRTPWriterFunc(w RTPWriter) interceptor.RTPWriterFunc {
@@ -237,7 +275,10 @@ func defaultRTPWriterFunc(w RTPWriter) interceptor.RTPWriterFunc {
 }
 
 func (s *Sender) Start() error {
-	i := s.ir.Build()
+	i, err := s.ir.Build("")
+	if err != nil {
+		return err
+	}
 	s.i = i
 
 	s.rtpWriter = s.i.BindLocalStream(s.streamInfo, interceptor.RTPWriterFunc(s.writeRTP))
@@ -247,34 +288,65 @@ func (s *Sender) Start() error {
 	}))
 
 	errC := make(chan error)
-
-	pipeline, err := gstsrc.NewPipeline(s.codec, s.src, s)
-	if err != nil {
-		return err
-	}
-	s.pipeline = pipeline
-
 	eosC := make(chan struct{})
-	gstsrc.HandleSrcEOS(func() {
-		close(eosC)
-	})
 
-	s.pipeline.SetSSRC(uint(s.streamInfo.SSRC))
-	s.pipeline.Start()
+	if s.codec == "synthetic" {
+		payloader := codecs.VP8Payloader{
+			EnablePictureID: true,
+		}
+		s.packetizer = rtp.NewPacketizer(
+			1200,
+			96,
+			0,
+			&payloader,
+			rtp.NewRandomSequencer(),
+			90000, // TODO?
+		)
+		encoder, err := syncodec.NewStatisticalEncoder(
+			s,
+			syncodec.WithInitialTargetBitrate(1_000_000),
+		)
+		if err != nil {
+			return err
+		}
+		s.encoder = encoder
+		go encoder.Start()
 
-	go gstsrc.StartMainLoop()
+	} else {
+
+		pipeline, err := gstsrc.NewPipeline(s.codec, s.src, s)
+		if err != nil {
+			return err
+		}
+		s.pipeline = pipeline
+
+		gstsrc.HandleSrcEOS(func() {
+			close(eosC)
+		})
+
+		s.pipeline.SetSSRC(uint(s.streamInfo.SSRC))
+		s.pipeline.Start()
+
+		go gstsrc.StartMainLoop()
+	}
 
 	select {
 	case <-eosC:
 		log.Println("eos")
 	case err := <-errC:
 		log.Printf("got error from interceptorWriter: %v\n", err)
-		s.pipeline.Stop()
+		if s.codec != "synthetic" {
+			s.pipeline.Stop()
+		}
 	case err := <-s.feedbackErrC:
 		log.Printf("got error from feedback Acceptor: %v\n", err)
-		s.pipeline.Stop()
+		if s.codec != "synthetic" {
+			s.pipeline.Stop()
+		}
 	case <-s.closeC:
-		s.pipeline.Stop()
+		if s.codec != "synthetic" {
+			s.pipeline.Stop()
+		}
 	}
 	s.i.Close()
 	select {

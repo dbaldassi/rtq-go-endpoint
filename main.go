@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"math/rand"
 	"os"
@@ -16,6 +15,9 @@ import (
 	"github.com/mengelbart/rtq-go-endpoint/internal/utils"
 	"github.com/mengelbart/rtq-go-endpoint/rtc"
 	"github.com/mengelbart/rtq-go-endpoint/transport"
+	"github.com/pion/interceptor"
+	"github.com/pion/rtcp"
+	"github.com/pion/rtp"
 )
 
 func init() {
@@ -259,7 +261,7 @@ func send(src, proto, remote, codec, rtcc string, stream, inferFromSmoothedRTT b
 		log.Printf("unknown cc: %v\n", rtcc)
 	}
 
-	sender.ConfigureRTPLogInterceptor(rtcpInLog, ioutil.Discard, ioutil.Discard, rtpOutLog)
+	sender.ConfigureRTPLogInterceptor(rtcpInLog, rtpOutLog, rtpFormat, rtcpFormat)
 
 	done := make(chan struct{})
 	errChan := make(chan error)
@@ -374,7 +376,7 @@ func receive(dst, proto, remote, codec, rtcc string, stream bool) error {
 		return fmt.Errorf("failed to create RTP receiver: %v", err)
 	}
 
-	recv.ConfigureRTPLogInterceptor(ioutil.Discard, rtcpOutLog, rtpInLog, ioutil.Discard)
+	recv.ConfigureRTPLogInterceptor(rtcpOutLog, rtpInLog, rtpFormat, rtcpFormat)
 
 	if rtcc == SCREAM {
 		if err = recv.ConfigureSCReAMInterceptor(); err != nil {
@@ -462,4 +464,27 @@ func sendStreamData(ctx context.Context, q *transport.QUIC, start time.Time, log
 			fmt.Fprintf(logger, "%v, %v\n", time.Since(start).Milliseconds(), n)
 		}
 	}
+}
+
+func rtpFormat(pkt *rtp.Packet, _ interceptor.Attributes) string {
+	return fmt.Sprintf("%v, %v, %v, %v, %v, %v, %v\n",
+		time.Now().UnixMilli(),
+		pkt.PayloadType,
+		pkt.SSRC,
+		pkt.SequenceNumber,
+		pkt.Timestamp,
+		pkt.Marker,
+		pkt.MarshalSize(),
+	)
+}
+
+func rtcpFormat(pkts []rtcp.Packet, _ interceptor.Attributes) string {
+	res := fmt.Sprintf("%v\t", time.Now().UnixMilli())
+	for _, pkt := range pkts {
+		switch feedback := pkt.(type) {
+		case *rtcp.TransportLayerCC:
+			res += feedback.String()
+		}
+	}
+	return res
 }

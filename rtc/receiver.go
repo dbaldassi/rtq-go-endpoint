@@ -8,9 +8,9 @@ import (
 	"time"
 
 	gstsink "github.com/mengelbart/rtq-go-endpoint/internal/gstreamer-sink"
-	"github.com/mengelbart/rtq-go-endpoint/internal/scream"
-	"github.com/mengelbart/rtq-go-endpoint/internal/utils"
 	"github.com/pion/interceptor"
+	"github.com/pion/interceptor/pkg/packetdump"
+	"github.com/pion/interceptor/pkg/scream"
 	"github.com/pion/rtcp"
 )
 
@@ -90,20 +90,41 @@ func (r *Receiver) ConfigureSCReAMInterceptor() error {
 	return nil
 }
 
-func (r *Receiver) ConfigureRTPLogInterceptor(rtcpIn, rtcpOut, rtpIn, rtpOut io.Writer) {
-	i := utils.NewRTPLogInterceptor(rtcpIn, rtcpOut, rtpIn, rtpOut)
-	r.ir.Add(i)
-}
-
-func (r *Receiver) Receive() error {
-	i := r.ir.Build()
-	r.i = i
-
-	pipeline, err := gstsink.NewPipeline(r.codec, r.dst)
+func (r *Receiver) ConfigureRTPLogInterceptor(rtcpWriter, rtpWriter io.Writer, rtpFormat packetdump.RTPFormatCallback, rtcpFormat packetdump.RTCPFormatCallback) error {
+	rtcpDumperInterceptor, err := packetdump.NewSenderInterceptor(
+		packetdump.RTCPFormatter(rtcpFormat),
+		packetdump.RTCPWriter(rtcpWriter),
+	)
 	if err != nil {
 		return err
 	}
-	r.pipeline = pipeline
+	rtpDumperInterceptor, err := packetdump.NewReceiverInterceptor(
+		packetdump.RTPFormatter(rtpFormat),
+		packetdump.RTPWriter(rtpWriter),
+	)
+	if err != nil {
+		return err
+	}
+
+	r.ir.Add(rtpDumperInterceptor)
+	r.ir.Add(rtcpDumperInterceptor)
+	return nil
+}
+
+func (r *Receiver) Receive() error {
+	i, err := r.ir.Build("")
+	if err != nil {
+		return err
+	}
+	r.i = i
+
+	if r.codec != "synthetic" {
+		pipeline, err := gstsink.NewPipeline(r.codec, r.dst)
+		if err != nil {
+			return err
+		}
+		r.pipeline = pipeline
+	}
 
 	eosC := make(chan struct{})
 	gstsink.HandleSinkEOS(func() {
@@ -111,7 +132,9 @@ func (r *Receiver) Receive() error {
 	})
 
 	r.rtpReader = r.i.BindRemoteStream(r.streamInfo, interceptor.RTCPReaderFunc(func(in []byte, _ interceptor.Attributes) (int, interceptor.Attributes, error) {
-		r.pipeline.Push(in)
+		if r.codec != "synthetic" {
+			r.pipeline.Push(in)
+		}
 		return len(in), nil, nil
 	}))
 
@@ -138,16 +161,22 @@ func (r *Receiver) Receive() error {
 		}
 	}()
 
-	r.pipeline.Start()
-	go gstsink.StartMainLoop()
+	if r.codec != "synthetic" {
+		r.pipeline.Start()
+		go gstsink.StartMainLoop()
+	}
 
 	select {
 	case err := <-connErrC:
 		log.Printf("got error from connection reader: %v\n", err)
-		r.pipeline.Stop()
+		if r.codec != "synthetic" {
+			r.pipeline.Stop()
+		}
 
 	case <-r.closeC:
-		r.pipeline.Stop()
+		if r.codec != "synthetic" {
+			r.pipeline.Stop()
+		}
 	}
 	r.i.Close()
 	select {

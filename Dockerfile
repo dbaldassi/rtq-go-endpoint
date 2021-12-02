@@ -27,7 +27,7 @@ COPY . .
 
 RUN go build -o /out/rtq main.go
 
-FROM ubuntu:20.04
+FROM engelbart/endpoint:latest
 
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -yqq \
         libgstreamer1.0-0 \
