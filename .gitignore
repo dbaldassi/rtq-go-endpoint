@@ -1,1 +1,6 @@
 rtq-go-endpoint
+*.csv
+exp*
+*.log
+.cache
+ssim
