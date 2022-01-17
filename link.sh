@@ -1,6 +1,6 @@
 #!/bin/bash
 
-NIC=enp0s31f6
+NIC=lo
 QDISC=tbf
 BURST=50kb
 
