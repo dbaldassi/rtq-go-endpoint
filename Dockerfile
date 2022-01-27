@@ -53,6 +53,9 @@ COPY --from=build \
         /src/tools/run_endpoint.sh \
         ./
 
+ADD link.sh ./
+
 RUN chmod +x run_endpoint.sh
+RUN chmod +x link.sh
 
 ENTRYPOINT [ "./run_endpoint.sh" ]

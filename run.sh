@@ -3,6 +3,7 @@
 LATENCIES=(1 50 150 300)
 TRANSPORT=("quic" "udp")
 CC=("naive" "scream" "scream-infer")
+AZD=("newreno" "nocc")
 
 # LATENCIES=(300)
 # TRANSPORT=("quic")
@@ -14,12 +15,16 @@ do
     do
 	for c in ${CC[@]}
 	do
-	    echo "$t $c $l"
-	    ./receiver.sh $t $c > /dev/null &
-	    # echo "$t $c $l" | socat tcp:192.168.1.33:8484 -
-	    ./send.sh $t $c $l > /dev/null 
-	    docker stop receiver sender
-	    # sleep 10
+	    for k in ${AZD[@]}
+	    do
+		echo "$t $c $l $k"
+		./receiver.sh $t $c $k > /dev/null &
+		sleep 1
+		# echo "$t $c $k" | socat tcp:192.168.1.47:8484 -
+		./send.sh $t $c $k $l > /dev/null 
+		docker stop receiver sender 
+		# sleep 10
+	    done
 	done
     done
 done  

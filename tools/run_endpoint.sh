@@ -6,12 +6,39 @@ set -e
 
 mkdir -p /logs/qlog
 
+# rtq #########################################################################
+
 if [ "$ROLE" == "sender" ]; then
     # Wait for the simulator to start up.
     #/wait-for-it.sh sim:57832 -s -t 10
     echo "Starting RTQ sender..."
+    ./link.sh $TC_CONFIG &
     QUIC_GO_LOG_LEVEL=error ./rtq send -addr $RECEIVER $SENDER_PARAMS $VIDEOS
-else
+    ./link.sh
+fi
+
+if [ "$ROLE" == "receiver" ]
+then
     echo "Running RTQ receiver."
     QUIC_GO_LOG_LEVEL=error ./rtq receive $RECEIVER_PARAMS $DESTINATION
+fi
+
+# iperf #######################################################################
+
+if [ "$ROLE" == "sender-iperf" ]; then
+    # Wait for the simulator to start up.
+    #/wait-for-it.sh sim:57832 -s -t 10
+    echo "Starting iperf sender... link -> $TC_CONFIG"
+ 
+    ./link.sh $TC_CONFIG &
+    iperf3 -c $RECEIVER -t 120
+    ./link.sh
+fi
+
+if [ "$ROLE" == "receiver-iperf" ]
+then
+    echo "Running iperf receiver."
+    ls
+    ip a
+    iperf3 -s -1
 fi
