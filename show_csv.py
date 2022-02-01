@@ -8,12 +8,14 @@ x = []
 y = []
 z = []
 
+csv_file = sys.argv.pop(1)
+
 if len(sys.argv) >= 2:
     fig_name = sys.argv[1]
 else:
     fig_name = "result"
 
-with open('bitrate.csv', 'r') as csvfile:
+with open(csv_file, 'r') as csvfile:
     lines = csv.reader(csvfile, delimiter=',')
 
     last = 0
@@ -39,7 +41,7 @@ plt.plot(x, y, color = 'r', label = "target")
 if(len(z) > 0):
     plt.plot(x, z, color = 'b', label = "transmitted")
 
-plt.plot([0,60,60,90,90,x[-1]], [1000,1000,500,500,1000,1000], label = "link", color = 'k')
+# plt.plot([0,60,60,90,90,x[-1]], [1000,1000,500,500,1000,1000], label = "link", color = 'k')
 
 plt.title(fig_name, fontsize = 20)
 plt.grid()
