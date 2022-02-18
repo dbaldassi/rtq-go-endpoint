@@ -1,6 +1,6 @@
 .git
 .github
-*.py
+.cache
 *.out
 *.csv
 *.mp4

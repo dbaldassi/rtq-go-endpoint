@@ -103,7 +103,7 @@ func (s *Sender) ConfigureInferingSCReAMInterceptor(statsLogger io.Writer, w Ack
 		Parameter: "ccfb",
 	})
 	s.ir.Add(cc)
-	go s.runSCReAMStats(statsLogger, cc)
+	go s.runSCReAMStats(statsLogger, cc, m)
 	return nil
 }
 
@@ -123,17 +123,17 @@ func (s *Sender) inferFeedback(fbc <-chan []byte) {
 	}()
 }
 
-func (s *Sender) ConfigureNaiveBitrateAdaption(statsLogger io.Writer) error {
+func (s *Sender) ConfigureNaiveBitrateAdaption(statsLogger io.Writer, m Metricer) error {
 	i, err := utils.NewSenderInterceptor()
 	if err != nil {
 		return err
 	}
 	s.ir.Add(i)
-	go s.runSCReAMStats(statsLogger, i)
+	go s.runSCReAMStats(statsLogger, i, m)
 	return nil
 }
 
-func (s *Sender) ConfigureSCReAMInterceptor(statsLogger io.Writer) error {
+func (s *Sender) ConfigureSCReAMInterceptor(statsLogger io.Writer, m Metricer) error {
 	tx := screamcgo.NewTx()
 	cc, err := scream.NewSenderInterceptor(scream.Tx(tx))
 	if err != nil {
@@ -144,7 +144,7 @@ func (s *Sender) ConfigureSCReAMInterceptor(statsLogger io.Writer) error {
 		Parameter: "ccfb",
 	})
 	s.ir.Add(cc)
-	go s.runSCReAMStats(statsLogger, cc)
+	go s.runSCReAMStats(statsLogger, cc, m)
 	return nil
 }
 
@@ -172,7 +172,7 @@ type congestionController interface {
 	GetStatistics() string
 }
 
-func (s *Sender) runSCReAMStats(statsLogger io.Writer, cc congestionController) {
+func (s *Sender) runSCReAMStats(statsLogger io.Writer, cc congestionController, m Metricer) {
 	ticker := time.NewTicker(20 * time.Millisecond)
 	start := time.Now()
 	var lastBitrate uint
@@ -194,8 +194,18 @@ func (s *Sender) runSCReAMStats(statsLogger io.Writer, cc congestionController) 
 			// rateAcked, rateLost, rateCe, hiSeqAck
 			stats := cc.GetStatistics()
 			// time, bitrate, stats
-			log.Printf("bitrate: %v %v %v\n", t, lastBitrate/1000, stats)
-			
+
+			var metrics = m.Metrics()
+			log.Printf("bitrate: %v %v\n", t, lastBitrate/1000)
+			log.Printf("QUIC_stats: %v %v %v %v %v %v %v\n",
+				metrics.LatestRTT.Seconds(),
+				metrics.PacketLoss,
+				metrics.PacketDropped,
+				metrics.SlowStart,
+				metrics.Recovery,
+				metrics.CongestionAvoidance,
+				metrics.ApplicationLimited)
+			log.Printf("SCReAM_stats: %v\n", stats)
 		case <-s.closeC:
 			return
 		}

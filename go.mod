@@ -12,4 +12,4 @@ require (
 	github.com/pion/rtp v1.7.2
 )
 
-replace github.com/lucas-clemente/quic-go v0.22.1 => github.com/mengelbart/quic-go v0.7.1-0.20210909103923-039f145025a1
+replace github.com/lucas-clemente/quic-go v0.22.1 => github.com/mengelbart/quic-go v0.7.1-0.20210909103716-3e25d1c2cf91

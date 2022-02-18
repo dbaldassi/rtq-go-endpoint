@@ -46,7 +46,10 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -yqq \
         gstreamer1.0-pulseaudio \
 	iproute2 \
 	iputils-ping \
-	iperf3
+    iperf3 \
+    tcpdump \
+    python3
+ 
 
 COPY --from=build \
         /out/rtq \
@@ -54,6 +57,7 @@ COPY --from=build \
         ./
 
 ADD link.sh ./
+ADD tcpdumpbitrate.py ./
 
 RUN chmod +x run_endpoint.sh
 RUN chmod +x link.sh

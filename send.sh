@@ -5,22 +5,27 @@
 # $3 : latency in ms
 # $4 : QUIC cc -> newreno | nocc
 
-# set link limit with tx
-# ./link.sh 1 0.5 60 30 $4 &
+# run docker
+docker run --name sender --rm -v $HOME/Vidéos/:/root -e VIDEOS="/root/moi.mkv" -e SENDER_PARAMS="-transport $1 -cc $2" -e QLOGDIR="/root/log_dir" -e ROLE=sender -e RECEIVER=172.17.0.2:4242 -e TC_CONFIG="1 0.5 60 30 $4" --cap-add=NET_ADMIN rtq-go-endpoint-$3 | tee out.log
 
-docker run --name sender --rm -v $HOME/Vidéos/:/root -e VIDEOS="/root/diamond.mp4" -e SENDER_PARAMS="-transport $1 -cc $2" -e ROLE=sender -e RECEIVER=172.17.0.2:4242 -e TC_CONFIG="1 0.5 60 30 $4" --cap-add=NET_ADMIN rtq-go-endpoint-$3 | tee out.log
-
-# delete qdisc
-# ./link.sh 
-
-cat out.log | grep bitrate | tr -d ',' | awk '{print $3","$4","$11}' > bitrate.csv
+## parse stats
+cat out.log | grep bitrate | tr -d ',' | awk '{print $3","$4}' > bitrate.csv
+cat out.log | grep QUIC_stats | tr -d ',' | awk '{print $3","$4","$5","$6","$7","$8","$9}' > qstats.csv
+cat out.log | grep SCReAM_stats | tr -d ',' | awk '{print $6","$7","$8","$9","$10","$11","$16}' > scream.csv
 
 sed -i s/",$"//g bitrate.csv
+sed -i s/",$"//g qstats.csv
+sed -i s/",$"//g scream.csv
 
-./show_csv.py bitrate.csv "bitrate_$1-$2-$3-$4" save
+./show_csv.py "stats_$1-$2-$3-$4" save
 
-# ./ssim ~/Vidéos/dinner720.mp4 ./out.y4m
-# ./show_ssim.py "ssim_$1-$2-$3-$4" save
-# rm -rf out.y4m
+## ssim
+./ssim ~/Vidéos/moi.mkv ./out.y4m
+./show_ssim.py "ssim_$1-$2-$3-$4" save
+rm -rf out.y4m
+
+## rename qlog file
+cd ~/Vidéos/log_dir/
+mv $(ls -1 -t | head -n 1) "ssim_$1-$2-$3-$4.qlog"
 
 # in : RTP receiveTime(ms) PayloadType ssrc sequenceNumber timestamp marker?(bool) len(payload)

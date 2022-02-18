@@ -13,6 +13,8 @@ if [ "$ROLE" == "sender" ]; then
     #/wait-for-it.sh sim:57832 -s -t 10
     echo "Starting RTQ sender..."
     ./link.sh $TC_CONFIG &
+    tcpdump -i eth0 -l -e -n src 172.17.0.3 | ./tcpdumpbitrate.py /root/send_bandwidth.csv &
+    tcpdump -i eth0 -l -e -n src 172.17.0.2 | ./tcpdumpbitrate.py /root/receive_bandwidth.csv &
     QUIC_GO_LOG_LEVEL=error ./rtq send -addr $RECEIVER $SENDER_PARAMS $VIDEOS
     ./link.sh
 fi

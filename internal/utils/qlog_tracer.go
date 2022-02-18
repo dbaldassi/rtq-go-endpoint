@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"log"
 	"context"
 	"net"
 	"sync"
@@ -16,6 +17,12 @@ type RTTTracer struct {
 	SmoothedRTT time.Duration
 	RTTVar      time.Duration
 	LatestRTT   time.Duration
+	packetLoss    int
+	packetDropped int
+	SlowStart           bool
+	CongestionAvoidance bool
+	Recovery            bool
+	ApplicationLimited  bool
 }
 
 type RTTStats struct {
@@ -23,6 +30,12 @@ type RTTStats struct {
 	SmoothedRTT time.Duration
 	RTTVar      time.Duration
 	LatestRTT   time.Duration
+	PacketLoss    int
+	PacketDropped int
+	SlowStart           bool
+	CongestionAvoidance bool
+	Recovery            bool
+	ApplicationLimited  bool
 }
 
 func (q *RTTTracer) Metrics() RTTStats {
@@ -33,6 +46,12 @@ func (q *RTTTracer) Metrics() RTTStats {
 		SmoothedRTT: q.SmoothedRTT,
 		RTTVar:      q.RTTVar,
 		LatestRTT:   q.LatestRTT,
+		PacketLoss: q.packetLoss,
+		PacketDropped: q.packetDropped,
+		SlowStart: q.SlowStart,
+		CongestionAvoidance: q.CongestionAvoidance,
+		Recovery: q.Recovery,
+		ApplicationLimited: q.ApplicationLimited,
 	}
 }
 
@@ -60,8 +79,45 @@ func (q *RTTTracer) updateLatestRTT(rttvar time.Duration) {
 	q.LatestRTT = rttvar
 }
 
+func (q *RTTTracer) updatePacketDrop() {
+	q.lock.Lock()
+	defer q.lock.Unlock()
+	q.packetDropped += 1
+}
+
+func (q *RTTTracer) updatePacketLoss() {
+	q.lock.Lock()
+	defer q.lock.Unlock()
+	q.packetLoss += 1
+}
+
+func (q *RTTTracer) updateCongestionState(state logging.CongestionState) {
+	q.lock.Lock()
+	defer q.lock.Unlock()
+
+	q.SlowStart = false
+	q.CongestionAvoidance = false
+	q.Recovery = false
+	q.ApplicationLimited = false
+
+	switch state {
+	case logging.CongestionStateSlowStart:
+		q.SlowStart = true
+		break
+	case logging.CongestionStateCongestionAvoidance:
+		q.CongestionAvoidance = true
+		break
+	case logging.CongestionStateRecovery:
+		q.Recovery = true
+		break
+	case logging.CongestionStateApplicationLimited:
+		q.ApplicationLimited = true
+		break
+	}
+}
+
 func NewTracer() *RTTTracer {
-	return &RTTTracer{}
+	return &RTTTracer{sync.Mutex{},0,0,0,0,0,0,false,false,false,false}
 }
 
 func (q *RTTTracer) TracerForConnection(ctx context.Context, p logging.Perspective, odcid logging.ConnectionID) logging.ConnectionTracer {
@@ -74,6 +130,7 @@ func (q *RTTTracer) SentPacket(addr net.Addr, header *logging.Header, count logg
 }
 
 func (q *RTTTracer) DroppedPacket(addr net.Addr, packetType logging.PacketType, count logging.ByteCount, reason logging.PacketDropReason) {
+	log.Printf("Packet dropped !! %d", reason);
 }
 
 type ConnectionRTTTracer struct {
@@ -114,6 +171,7 @@ func (c ConnectionRTTTracer) BufferedPacket(packetType logging.PacketType) {
 }
 
 func (c ConnectionRTTTracer) DroppedPacket(packetType logging.PacketType, count logging.ByteCount, reason logging.PacketDropReason) {
+	c.t.updatePacketDrop()
 }
 
 func (c *ConnectionRTTTracer) UpdatedMetrics(rttStats *logging.RTTStats, cwnd, bytesInFlight logging.ByteCount, packetsInFlight int) {
@@ -135,13 +193,16 @@ func (c *ConnectionRTTTracer) UpdatedMetrics(rttStats *logging.RTTStats, cwnd, b
 	}
 }
 
-func (c ConnectionRTTTracer) AcknowledgedPacket(logging.EncryptionLevel, logging.PacketNumber) {
+func (c ConnectionRTTTracer) AcknowledgedPacket(lvl logging.EncryptionLevel, num logging.PacketNumber) {
+	//log.Printf("Packet ack : %d", num);
 }
 
 func (c ConnectionRTTTracer) LostPacket(level logging.EncryptionLevel, number logging.PacketNumber, reason logging.PacketLossReason) {
+	c.t.updatePacketLoss()
 }
 
 func (c ConnectionRTTTracer) UpdatedCongestionState(state logging.CongestionState) {
+	c.t.updateCongestionState(state)
 }
 
 func (c ConnectionRTTTracer) UpdatedPTOCount(value uint32) {

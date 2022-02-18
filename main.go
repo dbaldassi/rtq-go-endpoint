@@ -123,11 +123,11 @@ func send(src, proto, remote, codec, rtcc string, stream, inferFromSmoothedRTT b
 	case QUIC:
 
 		var tracers []logging.Tracer
-		if rtcc == SCREAM_INFER {
-			rttTracer := utils.NewTracer()
-			tracers = append(tracers, rttTracer)
-			metricer = rttTracer
-		}
+
+		rttTracer := utils.NewTracer()
+		tracers = append(tracers, rttTracer)
+		metricer = rttTracer
+		
 		q, err := transport.NewQUICClient(remote, tracers...)
 		if err != nil {
 			return fmt.Errorf("failed to open RTQ session: %v", err)
@@ -223,7 +223,7 @@ func send(src, proto, remote, codec, rtcc string, stream, inferFromSmoothedRTT b
 		}
 		defer closeErr(cclog.Close)
 
-		err = sender.ConfigureSCReAMInterceptor(cclog)
+		err = sender.ConfigureSCReAMInterceptor(cclog, metricer)
 		if err != nil {
 			return fmt.Errorf("failed to configure SCReAM interceptor: %v", err)
 		}
@@ -250,7 +250,7 @@ func send(src, proto, remote, codec, rtcc string, stream, inferFromSmoothedRTT b
 			return fmt.Errorf("failed to get CC stats log writer: %v", err)
 		}
 		defer closeErr(cclog.Close)
-		err = sender.ConfigureNaiveBitrateAdaption(cclog)
+		err = sender.ConfigureNaiveBitrateAdaption(cclog, metricer)
 		if err != nil {
 			return fmt.Errorf("failed to configure naive bitrate adapter")
 		}
