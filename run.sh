@@ -1,7 +1,7 @@
 #!/bin/bash
 
 LATENCIES=(1 50 150 300)
-TRANSPORT=("quic" "udp")
+TRANSPORT=("quic")
 CC=("naive" "scream" "scream-infer")
 AZD=("newreno" "nocc")
 

@@ -4,3 +4,6 @@ exp*
 *.log
 .cache
 ssim
+*.png
+*.y4m
+*.qlog

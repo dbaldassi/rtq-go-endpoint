@@ -26,17 +26,21 @@ avoidance = []
 appLimited = []
 
 # -- Global
-timestamp_bandwidth = []
+timestamp_r_bandwidth = []
+timestamp_s_bandwidth = []
 send_bandwidth = []
 receive_bandwidth = []
 total_bandwidth = []
 
 # params
-limit1 = 1000 # bps
-limit2 = 500 # bps
-time1 = 60 # sec
-time2 = 90 # sec
-videotime = 120 # sec
+# limit1 = 1000 # bps
+# limit2 = 500 # bps
+# time1 = 60 # sec
+# time2 = 90 # sec
+# videotime = 120 # sec
+link_time  = []
+link_limit = []
+show_limit = True
 
 if len(sys.argv) >= 2:
     fig_name = sys.argv[1]
@@ -44,6 +48,21 @@ else:
     fig_name = "result"
 
 # Parse csv file
+
+## parse link limit
+with open('link_limit.csv', 'r') as csvfile:
+    lines = csv.reader(csvfile, delimiter=',')
+
+    for row in lines:
+        if(row[0] == 'NONE'):
+            show_limit = False
+            continue
+        link_time.append(int(row[0]))
+        link_time.append(int(row[1]))
+
+        limit = float(row[2]) * 1000
+        link_limit.append(limit)
+        link_limit.append(limit)
 
 ## parse time and target bitrate
 with open('bitrate.csv', 'r') as csvfile:
@@ -91,12 +110,13 @@ with open('scream.csv', 'r') as csvfile:
 with open('receive_bandwidth.csv', 'r') as csvfile:
     lines = csv.reader(csvfile, delimiter=',')
     for row in lines:
-        timestamp_bandwidth.append(float(row[0]))
+        timestamp_r_bandwidth.append(float(row[0]))
         receive_bandwidth.append(float(row[1]) * 8. / 1000.)
 
 with open('send_bandwidth.csv', 'r') as csvfile:
     lines = csv.reader(csvfile, delimiter=',')
     for row in lines:
+        timestamp_s_bandwidth.append(float(row[0]))
         send_bandwidth.append(float(row[1]) * 8. / 1000.)
 
 
@@ -109,14 +129,15 @@ plt.title(fig_name, fontsize = 20)
 # fig.title(fig_name, fontsize = 20)
 
 plt.subplot(321)
-plt.plot(time, target, color = 'r', label = "target")
-plt.plot([0,time1,time1,time2,time2,videotime],
-         [limit1,limit1,limit2,limit2,limit1,limit1],
-         label = "link", color = 'k')
 
-plt.plot(timestamp_bandwidth, send_bandwidth, color = 'y', label = "send_bandwidth")
-plt.plot(timestamp_bandwidth, receive_bandwidth, color = 'c', label = "receive_bandwidth")
-plt.plot(timestamp_bandwidth, total_bandwidth, color = 'g', label = "total_bandwidth")
+if(show_limit):
+    plt.plot(link_time, link_limit, label = "link", color = 'k')
+
+plt.plot(time, target, color = 'r', label = "target")
+
+plt.plot(timestamp_s_bandwidth, send_bandwidth, color = 'g', label = "send_bandwidth")
+plt.plot(timestamp_r_bandwidth, receive_bandwidth, color = 'c', label = "receive_bandwidth")
+# plt.plot(timestamp_bandwidth, total_bandwidth, color = 'g', label = "total_bandwidth")
 
 plt.legend()
 plt.grid()

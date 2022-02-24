@@ -6,7 +6,9 @@
 # $4 : QUIC cc -> newreno | nocc
 
 # run docker
-docker run --name sender --rm -v $HOME/Vidéos/:/root -e VIDEOS="/root/moi.mkv" -e SENDER_PARAMS="-transport $1 -cc $2" -e QLOGDIR="/root/log_dir" -e ROLE=sender -e RECEIVER=172.17.0.2:4242 -e TC_CONFIG="1 0.5 60 30 $4" --cap-add=NET_ADMIN rtq-go-endpoint-$3 | tee out.log
+VIDEO=moi.mkv
+
+docker run --name sender --rm -v $HOME/Vidéos/:/root -e VIDEOS="/root/$VIDEO" -e SENDER_PARAMS="-transport $1 -cc $2" -e QLOGDIR="/root/log_dir" -e ROLE=sender -e RECEIVER=172.17.0.2:4242 -e TC_CONFIG="$4 $(cat link_limit.csv | tr '\n' ' ')" --cap-add=NET_ADMIN rtq-go-endpoint-$3 | tee out.log
 
 ## parse stats
 cat out.log | grep bitrate | tr -d ',' | awk '{print $3","$4}' > bitrate.csv
@@ -20,9 +22,9 @@ sed -i s/",$"//g scream.csv
 ./show_csv.py "stats_$1-$2-$3-$4" save
 
 ## ssim
-./ssim ~/Vidéos/moi.mkv ./out.y4m
+./ssim ~/Vidéos/$VIDEO ./out.y4m
 ./show_ssim.py "ssim_$1-$2-$3-$4" save
-rm -rf out.y4m
+# rm -rf out.y4m
 
 ## rename qlog file
 cd ~/Vidéos/log_dir/

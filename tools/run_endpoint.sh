@@ -16,7 +16,6 @@ if [ "$ROLE" == "sender" ]; then
     tcpdump -i eth0 -l -e -n src 172.17.0.3 | ./tcpdumpbitrate.py /root/send_bandwidth.csv &
     tcpdump -i eth0 -l -e -n src 172.17.0.2 | ./tcpdumpbitrate.py /root/receive_bandwidth.csv &
     QUIC_GO_LOG_LEVEL=error ./rtq send -addr $RECEIVER $SENDER_PARAMS $VIDEOS
-    ./link.sh
 fi
 
 if [ "$ROLE" == "receiver" ]
