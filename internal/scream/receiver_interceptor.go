@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mengelbart/scream-go"
+	"github.com/dbaldassi/scream-go"
 	"github.com/pion/interceptor"
 	"github.com/pion/logging"
 	"github.com/pion/rtcp"

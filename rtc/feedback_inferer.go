@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/mengelbart/rtq-go-endpoint/internal/utils"
-	screamcgo "github.com/mengelbart/scream-go"
+	screamcgo "github.com/dbaldassi/scream-go"
 	"github.com/pion/interceptor"
 	"github.com/pion/rtp"
 )

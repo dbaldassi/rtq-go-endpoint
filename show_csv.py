@@ -10,11 +10,14 @@ target = []
 # -- Scream Stats
 transmitted = []
 loss = []
+cleared = []
 isInFastStart = []
 rtpQueueDelay = []
 sRTT = []
 cwnd = []
 bytesInFlight = []
+queueDelay = []
+queueDelayMax = []
 
 # -- QUIC Stats
 latestRTT = []
@@ -85,13 +88,16 @@ with open('scream.csv', 'r') as csvfile:
         if(row[0] == ''):
             continue
         else:
-            sRTT.append(float(row[0]))
-            cwnd.append(int(row[1]))
-            bytesInFlight.append(int(row[2]))
-            transmitted.append(int(row[3]))
-            isInFastStart.append(int(row[4]))
-            rtpQueueDelay.append(float(row[5]))
-            loss.append(int(row[6]))
+            queueDelay.append(float(row[0]))
+            queueDelayMax.append(float(row[1]))
+            sRTT.append(float(row[2]))
+            cwnd.append(int(row[3]))
+            bytesInFlight.append(int(row[4]))
+            transmitted.append(int(row[5]))
+            isInFastStart.append(int(row[6]))
+            rtpQueueDelay.append(float(row[7]))
+            cleared.append(int(row[8]))
+            loss.append(int(row[9]))
 
 ## parse QUIC stats
 # with open('qstats.csv', 'r') as csvfile:
@@ -147,13 +153,16 @@ if(len(transmitted) > 0):
     plt.legend()
     
     plt.subplot(322)
-    plt.plot(time, rtpQueueDelay, color = 'r', label = "rtp queue delay")
+    plt.plot(time, rtpQueueDelay, color = 'y', label = "rtp queue delay")
+    plt.plot(time, queueDelay, color = 'g', label = "queue delay")
+    plt.plot(time, queueDelayMax, color = 'r', label = "queue delay max")
     plt.plot(time, sRTT, color = 'b', label = "sRTT")
     plt.legend()
     plt.grid()
 
     plt.subplot(323)
-    plt.plot(time, loss, label = "loss rate")
+    plt.plot(time, cleared, label = "cleared")
+    plt.plot(time, loss, label = "loss")
     plt.legend()
     plt.grid()
 

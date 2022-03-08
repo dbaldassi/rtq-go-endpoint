@@ -1,6 +1,6 @@
 package scream
 
-import "github.com/mengelbart/scream-go"
+import "github.com/dbaldassi/scream-go"
 
 // SenderOption can be used to configure SenderInterceptor.
 type SenderOption func(r *SenderInterceptor) error

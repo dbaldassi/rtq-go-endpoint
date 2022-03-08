@@ -10,7 +10,7 @@ import (
 	gstsrc "github.com/mengelbart/rtq-go-endpoint/internal/gstreamer-src"
 	"github.com/mengelbart/rtq-go-endpoint/internal/scream"
 	"github.com/mengelbart/rtq-go-endpoint/internal/utils"
-	screamcgo "github.com/mengelbart/scream-go"
+	screamcgo "github.com/dbaldassi/scream-go"
 	"github.com/pion/interceptor"
 	"github.com/pion/rtp"
 )
@@ -190,21 +190,21 @@ func (s *Sender) runSCReAMStats(statsLogger io.Writer, cc congestionController, 
 			}
 			// queueDelay, queueDelayMax, queueDelayMinAvg, sRtt, cwnd,
 			// bytesInFlight, rateTransmitted, isInFastStart,
-			// rtpQueueDelay, targetBitrate, rateRtp, rateTransmitted,
-			// rateAcked, rateLost, rateCe, hiSeqAck
+			// rtpQueueDelay, bytes, size, targetBitrate, rateRtp, packetsRtp, rateTransmitted,
+			// rateAcked, rateLost, rateCe, packetsCe, hiSeqAck, packetRtpCleared, packetLost
 			stats := cc.GetStatistics()
 			// time, bitrate, stats
 
-			var metrics = m.Metrics()
+			// var metrics = m.Metrics()
 			log.Printf("bitrate: %v %v\n", t, lastBitrate/1000)
-			log.Printf("QUIC_stats: %v %v %v %v %v %v %v\n",
-				metrics.LatestRTT.Seconds(),
-				metrics.PacketLoss,
-				metrics.PacketDropped,
-				metrics.SlowStart,
-				metrics.Recovery,
-				metrics.CongestionAvoidance,
-				metrics.ApplicationLimited)
+			// log.Printf("QUIC_stats: %v %v %v %v %v %v %v\n",
+			// 	metrics.LatestRTT.Seconds(),
+			// 	metrics.PacketLoss,
+			// 	metrics.PacketDropped,
+			// 	metrics.SlowStart,
+			// 	metrics.Recovery,
+			// 	metrics.CongestionAvoidance,
+			// 	metrics.ApplicationLimited)
 			log.Printf("SCReAM_stats: %v\n", stats)
 		case <-s.closeC:
 			return

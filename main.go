@@ -170,7 +170,6 @@ func send(src, proto, remote, codec, rtcc string, stream, inferFromSmoothedRTT b
 		}
 
 	case UDP:
-
 		u, err := transport.NewUDPClient(remote)
 		if err != nil {
 			return fmt.Errorf("failed to open UDP session: %v", err)
