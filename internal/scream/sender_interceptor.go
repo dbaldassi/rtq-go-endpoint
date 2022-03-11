@@ -234,7 +234,7 @@ func (s *SenderInterceptor) loop(writer interceptor.RTPWriter, ssrc uint32) {
 			// no packets or CWND too small
 			continue
 
-		case transmit <= 1e-3:
+		default:
 			// send packet
 			packet := stream.queue.Dequeue()
 			if packet == nil {

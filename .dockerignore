@@ -8,6 +8,7 @@
 *.log
 *.y4m
 *.qlog
-moi*
-dinner*
-diamond*
+
+out
+results
+log_dir

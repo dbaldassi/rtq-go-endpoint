@@ -7,3 +7,5 @@ ssim
 *.png
 *.y4m
 *.qlog
+out
+videos

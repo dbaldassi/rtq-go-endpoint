@@ -56,8 +56,8 @@ COPY --from=build \
         /src/tools/run_endpoint.sh \
         ./
 
-ADD link.sh ./
-ADD tcpdumpbitrate.py ./
+ADD link/link.sh ./
+ADD tools/tcpdumpbitrate.py ./
 
 RUN chmod +x run_endpoint.sh
 RUN chmod +x link.sh
